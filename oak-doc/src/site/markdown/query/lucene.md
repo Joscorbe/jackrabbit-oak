@@ -40,6 +40,7 @@
     * [Mime type mapping](#mime-type-mapping)
 * [Non Root Index Definitions](#non-root-index)
 * [Function-Based Indexing](#function-based-indexing)
+* [Dynamic Boost](#dynamic-boost)
 * [Native Query and Index Selection](#native-query)
 * [Persisting indexes](#persisting-indexes)
 * [CopyOnRead](#copy-on-read)
@@ -235,7 +236,7 @@ refresh
   the index is not used. With blue-green deployments, it is possible that
   two versions of an application are running at the same time, with different `/libs` folders.
   This settings therefore allows to enable or disable index usage depending on the version in use.
-  (This index is still updated even if the node / property does not exist, 
+  (This index is still updated even if the node / property does not exist,
   so this setting only affects index usage for queries.)
   This option is supported for indexes of type `lucene` and `property`.
   `@since Oak 1.10.0`
@@ -308,7 +309,7 @@ indexNodeName
 By default, the cost of using this index is calculated follows: For each query,
 the overhead is one operation. For each entry in the index, the cost is one.
 The following only applies to `compatVersion` 2 only:
-To use use a lower or higher cost, you can set the following optional properties
+To use a lower or higher cost, you can set the following optional properties
 in the index definition:
 
     - costPerExecution (Double) = 1.0
@@ -426,10 +427,11 @@ ordered
   would cause indexing to fail.
 
 type
-: JCR Property type. Can be one of `Date`, `Boolean`, `Double` , `String` or `Long`. Mostly
-  inferred from the indexed value. However in some cases where same property
+: JCR Property type. Can be one of `Date`, `Boolean`, `Double` , `String`, `Long`, or `Binary`. 
+  Mostly inferred from the indexed value. However in some cases where same property
   type is not used consistently across various nodes then it would recommended
-   to specify the type explicitly.
+  to specify the type explicitly.
+  A binary is only indexed if there is an associated property `jcr:mimeType`.
 
 propertyIndex
 : Whether the index for this property is used for equality conditions, ordering,
@@ -465,6 +467,10 @@ function
 : Since 1.5.11, 1.6.0
 : Function, for [function-based indexing](#function-based-indexing).
 
+dynamicBoost
+: Since 1.28.0
+: Enable [dynamic boost](#dynamic-boost)
+
 <a name="weight"></a>
 weight
 : Allows to override the estimated number of entries per value,
@@ -477,6 +483,18 @@ weight
   See [OAK-6735][OAK-6735] for details.
 : Since 1.10: the default value is now `5`.
   See [OAK-7379][OAK-7379] for details.
+  
+sync
+: Since 1.8.0, [OAK-6535]
+: Changes to the content are available in the index as soon as they are committed.
+  Requires "propertyIndex=true".
+  Relative properties and notNullCheckEnabled are not supported.
+: See [synchronous Lucene property indexes][synchronous-lucene-property-indexes] for details.
+
+unique
+: Since 1.8.0, [OAK-6535]
+: Requires "sync=true". Enforces unique property values in the content.
+: See [synchronous Lucene property indexes][synchronous-lucene-property-indexes] for details.
 
 <a name="property-names"></a>**Property Names**
 
@@ -1032,7 +1050,7 @@ the config file via `tika/config.xml` node in index config.
 
 #### <a name="mime-type-usage"></a>Mime type usage
 
-A binary would only be index if there is an associated property `jcr:mimeType` defined
+A binary is only indexed if there is an associated property `jcr:mimeType` defined
 and that is supported by Tika. By default indexer uses [TypeDetector][OAK-2895]
 instead of default `DefaultDetector` which relies on the `jcr:mimeType` to pick up the
 right parser.
@@ -1098,6 +1116,31 @@ This allows to search for, and order by, the lower case version of the property 
 Indexing multi-valued properties is supported.
 Relative properties are supported (except for ".." and ".").
 Range conditions are supported ('>', '>=', '<=', '<').
+
+### <a name="dynamic-boost"></a>Dynamic Boost
+
+`@since Oak 1.28.0`
+
+To enable the feature, add a property to be indexed, e.g.:
+
+    dynamicBoost
+     - dynamicBoost = true (Boolean)
+     - propertyIndex = true
+     - name = jcr:content/metadata/predictedTags/.* (String)
+     - isRegexp = true (Boolean)
+
+That way, if a node `jcr:content/metadata/predictedTags` is added (for the indexed node type),
+then dynamic boost is used. It will read the child nodes of that node
+(`jcr:content/metadata/predictedTags`) and for each node it will read:
+
+* name (String)
+* confidence (Double)
+
+It will then add a field, for each token of the "name" property,
+with boost set to the confidence.
+This is a replacement for the `IndexFieldProvider`.
+See also [OAK-8971][OAK-8971].
+
 
 ### <a name="native-query"></a>Native Query and Index Selection
 
@@ -1527,32 +1570,33 @@ _Note that showing explanation score is expensive. So, this feature should be us
 
 `@since Oak 1.3.14`
 
+The following features is now deprecated:
 In OSGi enviroment, implementations of `IndexFieldProvider` and `FulltextQueryTermsProvider` under
 `org.apache.jackrabbit.oak.plugins.index.lucene.spi` (see javadoc [here][oak-lucene]) are called during indexing
 and querying as documented in javadocs.
 
 ### <a name="similar-fv"></a>Search by similar feature vectors
 
-Oak Lucene index currently supports _rep:similar_ queries via _MoreLikeThis_ for text properties, this allows to search 
+Oak Lucene index currently supports _rep:similar_ queries via _MoreLikeThis_ for text properties, this allows to search
 for similar nodes by looking at texts.
 This capability extends _rep:similar_ support to feature vectors, typically used to represent binary content like images,
 in order to search for similar nodes by looking at such vectors.
 
-In order to index JCR properties holding vector values for similarity search, either in form of blobs or in form of texts, 
+In order to index JCR properties holding vector values for similarity search, either in form of blobs or in form of texts,
 the index definition should have a rule for each such property with the _useInSimilarity_ parameter set to _true_.
-As a result, after (re)indexing, each vector will be indexed so that an approximate nearest neighbour search is possible, 
+As a result, after (re)indexing, each vector will be indexed so that an approximate nearest neighbour search is possible,
 not requiring brute force nearest neighbour search over the entire set of indexed vectors.
 
-By default another property for feature vector similarity search, called _similarityRerank_, is set to _true_ in order 
+By default another property for feature vector similarity search, called _similarityRerank_, is set to _true_ in order
 to allow reranking of the top 15 results using brute force nearest neighbour.
-Therefore in a first iteration an approximate nearest neighbour search is performed to obtain all the possibly relevant 
-results (expecting high recall), then a brute force nearest neighbour over the top 15 search results is performed to 
+Therefore in a first iteration an approximate nearest neighbour search is performed to obtain all the possibly relevant
+results (expecting high recall), then a brute force nearest neighbour over the top 15 search results is performed to
 improve precision (see [OAK-7824](https://issues.apache.org/jira/browse/OAK-7824), [OAK-7962](https://issues.apache.org/jira/browse/OAK-7962),
-[OAK-8119](https://issues.apache.org/jira/browse/OAK-8119)).  
+[OAK-8119](https://issues.apache.org/jira/browse/OAK-8119)).
 
 As a further improvement for the accuracy of similarity search results if nodes having feature vectors also have properties
- holding text values that can be used as keywords or tags that well describe the feature vector contents, the  
- _similarityTags_ configuration can be set to _true_ for such properties (see [OAK-8118](https://issues.apache.org/jira/browse/OAK-8118)). 
+ holding text values that can be used as keywords or tags that well describe the feature vector contents, the
+ _similarityTags_ configuration can be set to _true_ for such properties (see [OAK-8118](https://issues.apache.org/jira/browse/OAK-8118)).
 
 See also [OAK-7575](https://issues.apache.org/jira/browse/OAK-7575).
 
@@ -2109,9 +2153,11 @@ SELECT rep:facet(title) FROM [app:Asset] WHERE [title] IS NOT NULL
 [OAK-4516]: https://issues.apache.org/jira/browse/OAK-4516
 [OAK-5187]: https://issues.apache.org/jira/browse/OAK-5187
 [OAK-5899]: https://issues.apache.org/jira/browse/OAK-5899
+[OAK-6535]: https://issues.apache.org/jira/browse/OAK-6535
 [OAK-6735]: https://issues.apache.org/jira/browse/OAK-6735
 [OAK-7379]: https://issues.apache.org/jira/browse/OAK-7379
 [OAK-7739]: https://issues.apache.org/jira/browse/OAK-7739
+[OAK-8971]: https://issues.apache.org/jira/browse/OAK-8971
 [luke]: https://code.google.com/p/luke/
 [tika]: http://tika.apache.org/
 [oak-console]: https://github.com/apache/jackrabbit-oak/tree/trunk/oak-run#console
@@ -2125,3 +2171,4 @@ SELECT rep:facet(title) FROM [app:Asset] WHERE [title] IS NOT NULL
 [boost-faq]: https://wiki.apache.org/lucene-java/LuceneFAQ#How_do_I_make_sure_that_a_match_in_a_document_title_has_greater_weight_than_a_match_in_a_document_body.3F
 [score-explanation]: https://lucene.apache.org/core/4_6_0/core/org/apache/lucene/search/IndexSearcher.html#explain%28org.apache.lucene.search.Query,%20int%29
 [oak-lucene]: http://www.javadoc.io/doc/org.apache.jackrabbit/oak-lucene/
+[synchronous-lucene-property-indexes]: http://jackrabbit.apache.org/archive/wiki/JCR/Synchronous-Lucene-Property-Indexes_115513516.html

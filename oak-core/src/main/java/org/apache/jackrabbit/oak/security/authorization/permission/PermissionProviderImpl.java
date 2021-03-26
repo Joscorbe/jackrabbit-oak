@@ -16,8 +16,6 @@
  */
 package org.apache.jackrabbit.oak.security.authorization.permission;
 
-import java.security.Principal;
-import java.util.Set;
 import org.apache.jackrabbit.oak.api.PropertyState;
 import org.apache.jackrabbit.oak.api.Root;
 import org.apache.jackrabbit.oak.api.Tree;
@@ -40,6 +38,9 @@ import org.apache.jackrabbit.oak.spi.security.privilege.PrivilegeConstants;
 import org.apache.jackrabbit.oak.spi.version.VersionConstants;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
+
+import java.security.Principal;
+import java.util.Set;
 
 public class PermissionProviderImpl implements PermissionProvider, AccessControlConstants, PermissionConstants, AggregatedPermissionProvider {
 
@@ -83,6 +84,7 @@ public class PermissionProviderImpl implements PermissionProvider, AccessControl
     public void refresh() {
         immutableRoot = providerCtx.getRootProvider().createReadOnlyRoot(root);
         getCompiledPermissions().refresh(immutableRoot, workspaceName);
+        providerCtx.getMonitor().permissionRefresh();
     }
 
     @NotNull
@@ -174,7 +176,7 @@ public class PermissionProviderImpl implements PermissionProvider, AccessControl
 
     @NotNull
     protected PermissionStore getPermissionStore(@NotNull Root root, @NotNull String workspaceName, @NotNull RestrictionProvider restrictionProvider) {
-        return new PermissionStoreImpl(root, workspaceName, restrictionProvider);
+        return new PermissionStoreImpl(root, workspaceName, restrictionProvider, providerCtx.getMonitor());
     }
 
     private static boolean isVersionStorePath(@NotNull String oakPath) {

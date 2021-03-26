@@ -28,7 +28,7 @@ public class LuceneMain {
 
     private static final Modes MODES = new Modes(ImmutableMap.<String, Command>of(
             "benchmark", new BenchmarkLuceneCommand(),
-            "scalability", new ScalabilityCommand()
+            "scalability", new ScalabilityLuceneCommand()
     ));
 
     private LuceneMain() {

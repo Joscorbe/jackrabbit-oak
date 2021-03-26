@@ -16,7 +16,9 @@
  */
 package org.apache.jackrabbit.oak.security.authentication;
 
+import com.google.common.collect.Iterables;
 import org.apache.jackrabbit.oak.api.ContentRepository;
+import org.apache.jackrabbit.oak.security.authentication.monitor.LoginModuleMonitorImpl;
 import org.apache.jackrabbit.oak.security.internal.SecurityProviderBuilder;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
 import org.apache.jackrabbit.oak.spi.security.authentication.AuthenticationConfiguration;
@@ -25,6 +27,8 @@ import org.apache.jackrabbit.oak.spi.security.authentication.LoginModuleMonitor;
 import org.apache.jackrabbit.oak.spi.whiteboard.DefaultWhiteboard;
 import org.apache.jackrabbit.oak.spi.whiteboard.Whiteboard;
 import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardAware;
+import org.apache.jackrabbit.oak.stats.Monitor;
+import org.apache.jackrabbit.oak.stats.StatisticsProvider;
 import org.junit.Test;
 import org.mockito.Mockito;
 
@@ -89,15 +93,17 @@ public class AuthenticationConfigurationImplTest {
     }
 
     @Test
-    public void testSetLoginModuleMonitor() throws Exception {
+    public void testGetMonitors() throws Exception {
         Field f = AuthenticationConfigurationImpl.class.getDeclaredField("lmMonitor");
         f.setAccessible(true);
-
         assertSame(LoginModuleMonitor.NOOP, f.get(authConfiguration));
 
-        LoginModuleMonitor monitor = mock(LoginModuleMonitor.class);
-        authConfiguration.setLoginModuleMonitor(monitor);
+        StatisticsProvider statisticsProvider = StatisticsProvider.NOOP;
+        Iterable<Monitor<?>> monitors = authConfiguration.getMonitors(statisticsProvider);
+        assertEquals(1, Iterables.size(monitors));
 
-        assertSame(monitor, f.get(authConfiguration));
+        Monitor<?> m = monitors.iterator().next();
+        assertTrue(m instanceof LoginModuleMonitorImpl);
+        assertTrue(f.get(authConfiguration) instanceof LoginModuleMonitorImpl);
     }
 }

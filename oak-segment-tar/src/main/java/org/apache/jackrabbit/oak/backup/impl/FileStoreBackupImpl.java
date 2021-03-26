@@ -26,7 +26,7 @@ import java.io.IOException;
 
 import com.google.common.base.Stopwatch;
 import org.apache.jackrabbit.oak.backup.FileStoreBackup;
-import org.apache.jackrabbit.oak.segment.Compactor;
+import org.apache.jackrabbit.oak.segment.ClassicCompactor;
 import org.apache.jackrabbit.oak.segment.DefaultSegmentWriter;
 import org.apache.jackrabbit.oak.segment.Revisions;
 import org.apache.jackrabbit.oak.segment.SegmentBufferWriter;
@@ -83,9 +83,10 @@ public class FileStoreBackupImpl implements FileStoreBackup {
                     backup.getSegmentIdProvider(),
                     backup.getBlobStore(),
                     new WriterCacheManager.Default(),
-                    bufferWriter
+                    bufferWriter,
+                    backup.getBinariesInlineThreshold()
             );
-            Compactor compactor = new Compactor(
+            ClassicCompactor compactor = new ClassicCompactor(
                     backup.getReader(),
                     writer,
                     backup.getBlobStore(),

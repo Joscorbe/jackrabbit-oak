@@ -23,7 +23,7 @@
   <parent>
     <groupId>org.apache.jackrabbit</groupId>
     <artifactId>oak-parent</artifactId>
-    <version>1.27-SNAPSHOT</version>
+    <version>1.39-SNAPSHOT</version>
     <relativePath>oak-parent/pom.xml</relativePath>
   </parent>
 
@@ -73,11 +73,15 @@
     <module>oak-examples</module>
     <module>oak-it</module>
     <module>oak-segment-tar</module>
+    <module>oak-segment-remote</module>
+    <module>oak-segment-aws</module>
     <module>oak-segment-azure</module>
     <module>oak-benchmarks</module>
     <module>oak-search-elastic</module>
     <module>oak-benchmarks-lucene</module>
     <module>oak-benchmarks-solr</module>
+    <module>oak-benchmarks-elastic</module>
+      <module>oak-run-elastic</module>
   </modules>
 
   <scm>

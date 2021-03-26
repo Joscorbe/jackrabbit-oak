@@ -17,10 +17,6 @@
 
 package org.apache.jackrabbit.oak.blob.cloud.s3;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.collect.Iterables.filter;
-import static java.lang.Thread.currentThread;
-
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
@@ -42,6 +38,22 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+
+import org.apache.commons.io.IOUtils;
+import org.apache.jackrabbit.core.data.DataIdentifier;
+import org.apache.jackrabbit.core.data.DataRecord;
+import org.apache.jackrabbit.core.data.DataStoreException;
+import org.apache.jackrabbit.core.data.util.NamedThreadFactory;
+import org.apache.jackrabbit.oak.commons.PropertiesUtil;
+import org.apache.jackrabbit.oak.plugins.blob.datastore.directaccess.DataRecordDownloadOptions;
+import org.apache.jackrabbit.oak.plugins.blob.datastore.directaccess.DataRecordUpload;
+import org.apache.jackrabbit.oak.plugins.blob.datastore.directaccess.DataRecordUploadException;
+import org.apache.jackrabbit.oak.plugins.blob.datastore.directaccess.DataRecordUploadToken;
+import org.apache.jackrabbit.oak.spi.blob.AbstractDataRecord;
+import org.apache.jackrabbit.oak.spi.blob.AbstractSharedBackend;
+import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.amazonaws.AmazonClientException;
 import com.amazonaws.AmazonServiceException;
@@ -83,22 +95,10 @@ import com.google.common.cache.CacheBuilder;
 import com.google.common.collect.AbstractIterator;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import org.apache.commons.io.IOUtils;
-import org.apache.http.protocol.HTTP;
-import org.apache.jackrabbit.core.data.DataIdentifier;
-import org.apache.jackrabbit.core.data.DataRecord;
-import org.apache.jackrabbit.core.data.DataStoreException;
-import org.apache.jackrabbit.core.data.util.NamedThreadFactory;
-import org.apache.jackrabbit.oak.commons.PropertiesUtil;
-import org.apache.jackrabbit.oak.plugins.blob.datastore.directaccess.DataRecordDownloadOptions;
-import org.apache.jackrabbit.oak.plugins.blob.datastore.directaccess.DataRecordUpload;
-import org.apache.jackrabbit.oak.plugins.blob.datastore.directaccess.DataRecordUploadException;
-import org.apache.jackrabbit.oak.plugins.blob.datastore.directaccess.DataRecordUploadToken;
-import org.apache.jackrabbit.oak.spi.blob.AbstractDataRecord;
-import org.apache.jackrabbit.oak.spi.blob.AbstractSharedBackend;
-import org.jetbrains.annotations.NotNull;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
+import static com.google.common.base.Preconditions.checkArgument;
+import static com.google.common.collect.Iterables.filter;
+import static java.lang.Thread.currentThread;
 
 /**
  * A data store backend that stores data on Amazon S3.
@@ -176,28 +176,22 @@ public class S3Backend extends AbstractSharedBackend {
                 }
             }
             String region = properties.getProperty(S3Constants.S3_REGION);
-            Region s3Region;
+            
             if (StringUtils.isNullOrEmpty(region)) {
                 com.amazonaws.regions.Region ec2Region = Regions.getCurrentRegion();
                 if (ec2Region != null) {
-                    s3Region = Region.fromValue(ec2Region.getName());
+                    region = ec2Region.getName();
                 } else {
                     throw new AmazonClientException(
                             "parameter ["
                                     + S3Constants.S3_REGION
                                     + "] not configured and cannot be derived from environment");
                 }
-            } else {
-                if (Utils.DEFAULT_AWS_BUCKET_REGION.equals(region)) {
-                    s3Region = Region.US_Standard;
-                } else if (Region.EU_Ireland.toString().equals(region)) {
-                    s3Region = Region.EU_Ireland;
-                } else {
-                    s3Region = Region.fromValue(region);
-                }
+            } else if (Utils.DEFAULT_AWS_BUCKET_REGION.equals(region)) {
+                region = Region.US_Standard.toString();
             }
 
-            createBucketIfNeeded(s3Region);
+            createBucketIfNeeded(region);
 
             int writeThreads = 10;
             String writeThreadsStr = properties.getProperty(S3Constants.S3_WRITE_THREADS);
@@ -265,24 +259,32 @@ public class S3Backend extends AbstractSharedBackend {
         }
     }
 
-    private void createBucketIfNeeded(@NotNull final Region s3Region) {
+    private void createBucketIfNeeded(final String region) {
         try {
             if (!s3service.doesBucketExist(bucket)) {
-                CreateBucketRequest req = new CreateBucketRequest(bucket, s3Region);
+                String bucketRegion = region;
+                if (Utils.US_EAST_1_AWS_BUCKET_REGION.equals(region)) {
+                    // The SDK has changed such that if the region is us-east-1
+                    // the region value should not be provided in the
+                    // request to create the bucket.
+                    // See https://stackoverflow.com/questions/51912072/invalidlocationconstraint-error-while-creating-s3-bucket-when-the-used-command-i
+                    bucketRegion = null;
+                }
+                CreateBucketRequest req = new CreateBucketRequest(bucket, bucketRegion);
                 s3service.createBucket(req);
                 if (Utils.waitForBucket(s3service, bucket)) {
                     LOG.error("Bucket [{}] does not exist in [{}] and was not automatically created",
-                            bucket, s3Region.name());
+                            bucket, region);
                     return;
                 }
-                LOG.info("Created bucket [{}] in [{}] ", bucket, s3Region.name());
+                LOG.info("Created bucket [{}] in [{}] ", bucket, region);
             } else {
-                LOG.info("Using bucket [{}] in [{}] ", bucket, s3Region.name());
+                LOG.info("Using bucket [{}] in [{}] ", bucket, region);
             }
         }
         catch (SdkClientException awsException) {
             LOG.error("Attempt to create S3 bucket [{}] in [{}] failed",
-                    bucket, s3Region.name(), awsException);
+                    bucket, region, awsException);
         }
     }
 

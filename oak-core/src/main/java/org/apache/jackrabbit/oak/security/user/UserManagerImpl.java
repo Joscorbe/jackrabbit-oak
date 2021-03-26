@@ -16,14 +16,6 @@
  */
 package org.apache.jackrabbit.oak.security.user;
 
-import java.io.UnsupportedEncodingException;
-import java.security.NoSuchAlgorithmException;
-import java.security.Principal;
-import java.util.Iterator;
-import java.util.Set;
-import javax.jcr.RepositoryException;
-import javax.jcr.UnsupportedRepositoryOperationException;
-
 import com.google.common.base.Strings;
 import com.google.common.collect.Iterables;
 import org.apache.jackrabbit.api.security.principal.PrincipalManager;
@@ -40,6 +32,7 @@ import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.nodetype.ReadOnlyNodeTypeManager;
 import org.apache.jackrabbit.oak.plugins.tree.TreeUtil;
 import org.apache.jackrabbit.oak.plugins.value.jcr.PartialValueFactory;
+import org.apache.jackrabbit.oak.security.user.monitor.UserMonitor;
 import org.apache.jackrabbit.oak.security.user.query.UserQueryManager;
 import org.apache.jackrabbit.oak.spi.security.ConfigurationParameters;
 import org.apache.jackrabbit.oak.spi.security.SecurityProvider;
@@ -61,6 +54,16 @@ import org.jetbrains.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.jcr.RepositoryException;
+import javax.jcr.UnsupportedRepositoryOperationException;
+import java.io.UnsupportedEncodingException;
+import java.security.NoSuchAlgorithmException;
+import java.security.Principal;
+import java.util.Iterator;
+import java.util.Set;
+
+import static com.google.common.base.Preconditions.checkArgument;
+
 /**
  * UserManagerImpl...
  */
@@ -77,17 +80,20 @@ public class UserManagerImpl implements UserManager {
     private final MembershipProvider membershipProvider;
     private final ConfigurationParameters config;
     private final AuthorizableActionProvider actionProvider;
+    private final UserMonitor monitor;
 
     private UserQueryManager queryManager;
     private ReadOnlyNodeTypeManager ntMgr;
 
     public UserManagerImpl(@NotNull Root root,
                            @NotNull PartialValueFactory valueFactory,
-                           @NotNull SecurityProvider securityProvider) {
+                           @NotNull SecurityProvider securityProvider,
+                           @NotNull UserMonitor monitor) {
         this.root = root;
         this.valueFactory = valueFactory;
         this.namePathMapper = valueFactory.getNamePathMapper();
         this.securityProvider = securityProvider;
+        this.monitor = monitor;
 
         UserConfiguration uc = securityProvider.getConfiguration(UserConfiguration.class);
         this.config = uc.getParameters();
@@ -194,6 +200,7 @@ public class UserManagerImpl implements UserManager {
         setPrincipal(userTree, principal);
 
         User user = new SystemUserImpl(userID, userTree, this);
+        onCreate(user);
 
         log.debug("System user created: {}", userID);
         return user;
@@ -274,7 +281,14 @@ public class UserManagerImpl implements UserManager {
                 action.onCreate(user, password, root, namePathMapper);
             }
         } else {
-            log.debug("Omit onCreate action for system users.");
+            log.warn("onCreate(User,String) called for system user. Use onCreate(User) instead.");
+        }
+    }
+
+    void onCreate(@NotNull User systemUser) throws RepositoryException {
+        checkArgument(systemUser.isSystemUser());
+        for (AuthorizableAction action : actionProvider.getAuthorizableActions(securityProvider)) {
+            action.onCreate(systemUser, root, namePathMapper);
         }
     }
 
@@ -436,6 +450,11 @@ public class UserManagerImpl implements UserManager {
     @NotNull
     PrincipalManager getPrincipalManager() {
         return securityProvider.getConfiguration(PrincipalConfiguration.class).getPrincipalManager(root, namePathMapper);
+    }
+
+    @NotNull
+    UserMonitor getMonitor() {
+        return monitor;
     }
 
     @NotNull

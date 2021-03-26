@@ -26,6 +26,7 @@ import java.io.InputStream;
 import java.lang.management.ManagementFactory;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -67,12 +68,12 @@ import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.LuceneIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.DefaultIndexReaderFactory;
 import org.apache.jackrabbit.oak.plugins.index.lucene.reader.LuceneIndexReaderFactory;
-import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
-import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder.IndexRule;
+import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
 import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
+import org.apache.jackrabbit.oak.plugins.index.search.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.nodetype.TypeEditorProvider;
@@ -216,6 +217,32 @@ public class HybridIndexTest extends AbstractQueryTest {
     }
 
     @Test
+    public void testSimilarityQuery() throws Exception {
+        String idxName = "hybridtest";
+        Tree idx = createFulltextIndex(root.getTree("/"), idxName);
+        TestUtil.enableIndexingMode(idx, FulltextIndexConstants.IndexingMode.NRT);
+        root.commit();
+        String query = "select [jcr:path] from [nt:base] where similar(., '/test/a')";
+
+        //Get initial indexing done as local indexing only work
+        //for incremental indexing
+        Tree test = root.getTree("/").addChild("test");
+        test.addChild("a").setProperty("text", "Hello World Hello World");
+        root.commit();
+        runAsyncIndex();
+        test = root.getTree("/").addChild("test");
+        test.addChild("b").setProperty("text", "Hello World");
+        test.addChild("c").setProperty("text", "World");
+        test.addChild("d").setProperty("text", "Hello");
+        root.commit();
+
+        //Now let some time elapse such that readers can be refreshed
+        clock.waitUntil(clock.getTime() + refreshDelta + 1);
+        List<String> result = executeQuery(query, "JCR-SQL2");
+        assertEquals(4, result.size());
+    }
+
+    @Test
     public void noTextExtractionForSyncCommit() throws Exception{
         String idxName = "hybridtest";
         Tree idx = createFulltextIndex(root.getTree("/"), idxName);
@@ -315,7 +342,7 @@ public class HybridIndexTest extends AbstractQueryTest {
     @Test
     public void newNodeTypesFoundLater2() throws Exception{
         String idxName = "hybridtest";
-        IndexDefinitionBuilder idx = new IndexDefinitionBuilder();
+        LuceneIndexDefinitionBuilder idx = new LuceneIndexDefinitionBuilder();
         idx.indexRule("oak:TestNode")
                 .property(JcrConstants.JCR_PRIMARYTYPE).propertyIndex();
         idx.indexRule("nt:base")
@@ -505,8 +532,8 @@ public class HybridIndexTest extends AbstractQueryTest {
     }
 
     private static Tree createIndex(Tree index, String name, Set<String> propNames){
-        IndexDefinitionBuilder idx = new IndexDefinitionBuilder();
-        IndexRule rule = idx.indexRule("nt:base");
+        LuceneIndexDefinitionBuilder idx = new LuceneIndexDefinitionBuilder();
+        IndexDefinitionBuilder.IndexRule rule = idx.indexRule("nt:base");
         for (String propName : propNames){
             rule.property(propName).propertyIndex();
         }
@@ -516,7 +543,7 @@ public class HybridIndexTest extends AbstractQueryTest {
     }
 
     private static Tree createFulltextIndex(Tree index, String name){
-        IndexDefinitionBuilder idx = new IndexDefinitionBuilder();
+        LuceneIndexDefinitionBuilder idx = new LuceneIndexDefinitionBuilder();
         idx.evaluatePathRestrictions();
         idx.indexRule("nt:base")
                 .property(FulltextIndexConstants.REGEX_ALL_PROPS, true)

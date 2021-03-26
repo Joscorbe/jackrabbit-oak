@@ -52,6 +52,11 @@ public class UserImporterSessionAutosaveTest extends UserImporterTest {
     }
 
     @Override
+    boolean isAutosave() {
+        return true;
+    }
+
+    @Override
     public void after() throws Exception {
         try {
             UserManager uMgr = getUserManager(root);
@@ -64,30 +69,10 @@ public class UserImporterSessionAutosaveTest extends UserImporterTest {
     }
 
     @Override
-    boolean init(boolean createAction) throws Exception {
+    boolean init(boolean createAction, Class<?>... extraInterfaces) throws Exception {
         getUserManager(root).autoSave(false);
-        boolean b = super.init(createAction);
+        boolean b = super.init(createAction, extraInterfaces);
         getUserManager(root).autoSave(true);
         return b;
-    }
-
-    @Test
-    public void testInitImportUUIDBehaviorRemove() throws Exception {
-        assertFalse(importer.init(mockJackrabbitSession(), root, getNamePathMapper(), isWorkspaceImport(), ImportUUIDBehavior.IMPORT_UUID_COLLISION_REMOVE_EXISTING, new ReferenceChangeTracker(), getSecurityProvider()));
-    }
-
-    @Test
-    public void testInitImportUUIDBehaviorReplace() throws Exception {
-        assertFalse(importer.init(mockJackrabbitSession(), root, getNamePathMapper(), isWorkspaceImport(), ImportUUIDBehavior.IMPORT_UUID_COLLISION_REPLACE_EXISTING, new ReferenceChangeTracker(), getSecurityProvider()));
-    }
-
-    @Test
-    public void testInitImportUUIDBehaviorThrow() throws Exception {
-        assertFalse(importer.init(mockJackrabbitSession(), root, getNamePathMapper(), isWorkspaceImport(), ImportUUIDBehavior.IMPORT_UUID_COLLISION_THROW, new ReferenceChangeTracker(), getSecurityProvider()));
-    }
-
-    @Test
-    public void testInitImportUUIDBehaviourCreateNew() throws Exception {
-        assertFalse(importer.init(mockJackrabbitSession(), root, getNamePathMapper(), isWorkspaceImport(), ImportUUIDBehavior.IMPORT_UUID_CREATE_NEW, new ReferenceChangeTracker(), getSecurityProvider()));
     }
 }

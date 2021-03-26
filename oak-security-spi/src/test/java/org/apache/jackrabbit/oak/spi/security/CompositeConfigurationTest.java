@@ -16,11 +16,9 @@
  */
 package org.apache.jackrabbit.oak.spi.security;
 
-import java.security.Principal;
-import java.util.List;
-import java.util.Set;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import org.apache.jackrabbit.oak.plugins.tree.RootProvider;
 import org.apache.jackrabbit.oak.plugins.tree.TreeProvider;
 import org.apache.jackrabbit.oak.spi.commit.CommitHook;
@@ -31,13 +29,19 @@ import org.apache.jackrabbit.oak.spi.lifecycle.CompositeInitializer;
 import org.apache.jackrabbit.oak.spi.lifecycle.CompositeWorkspaceInitializer;
 import org.apache.jackrabbit.oak.spi.lifecycle.RepositoryInitializer;
 import org.apache.jackrabbit.oak.spi.lifecycle.WorkspaceInitializer;
+import org.apache.jackrabbit.oak.spi.security.authentication.LoginModuleMonitor;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
+import org.apache.jackrabbit.oak.stats.Monitor;
+import org.apache.jackrabbit.oak.stats.StatisticsProvider;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.junit.Before;
 import org.junit.Test;
-import org.mockito.Mockito;
 import org.osgi.framework.Constants;
+
+import java.security.Principal;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
@@ -45,6 +49,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
+import static org.mockito.Mockito.mock;
 
 public class CompositeConfigurationTest extends AbstractCompositeConfigurationTest {
 
@@ -198,7 +203,7 @@ public class CompositeConfigurationTest extends AbstractCompositeConfigurationTe
     public void testSetSecurityProvider() {
         CompositeConfiguration cc = new CompositeConfiguration("name") {};
 
-        SecurityProvider securityProvider = Mockito.mock(SecurityProvider.class);
+        SecurityProvider securityProvider = mock(SecurityProvider.class);
         cc.setSecurityProvider(securityProvider);
 
         assertSame(securityProvider, cc.getSecurityProvider());
@@ -214,7 +219,7 @@ public class CompositeConfigurationTest extends AbstractCompositeConfigurationTe
     public void testSetRootProvider() {
         CompositeConfiguration cc = new CompositeConfiguration("name") {};
 
-        RootProvider rootProvider = Mockito.mock(RootProvider.class);
+        RootProvider rootProvider = mock(RootProvider.class);
         cc.setRootProvider(rootProvider);
 
         assertSame(rootProvider, cc.getRootProvider());
@@ -230,7 +235,7 @@ public class CompositeConfigurationTest extends AbstractCompositeConfigurationTe
     public void testSetTreeProvider() {
         CompositeConfiguration cc = new CompositeConfiguration("name") {};
 
-        TreeProvider treeProvider = Mockito.mock(TreeProvider.class);
+        TreeProvider treeProvider = mock(TreeProvider.class);
         cc.setTreeProvider(treeProvider);
 
         assertSame(treeProvider, cc.getTreeProvider());
@@ -247,7 +252,7 @@ public class CompositeConfigurationTest extends AbstractCompositeConfigurationTe
             @NotNull
             @Override
             public List<ProtectedItemImporter> getProtectedItemImporters() {
-                return ImmutableList.of(Mockito.mock(ProtectedItemImporter.class));
+                return ImmutableList.of(mock(ProtectedItemImporter.class));
             }
         };
         addConfiguration(withImporter);
@@ -266,7 +271,7 @@ public class CompositeConfigurationTest extends AbstractCompositeConfigurationTe
             @NotNull
             @Override
             public List<ThreeWayConflictHandler> getConflictHandlers() {
-                return ImmutableList.of(Mockito.mock(ThreeWayConflictHandler.class));
+                return ImmutableList.of(mock(ThreeWayConflictHandler.class));
             }
         };
         addConfiguration(withConflictHandler);
@@ -285,7 +290,7 @@ public class CompositeConfigurationTest extends AbstractCompositeConfigurationTe
             @NotNull
             @Override
             public List<? extends CommitHook> getCommitHooks(@NotNull String workspaceName) {
-                return ImmutableList.of(Mockito.mock(CommitHook.class));
+                return ImmutableList.of(mock(CommitHook.class));
             }
         };
         addConfiguration(withCommitHook);
@@ -304,7 +309,7 @@ public class CompositeConfigurationTest extends AbstractCompositeConfigurationTe
             @NotNull
             @Override
             public List<? extends ValidatorProvider> getValidators(@NotNull String workspaceName, @NotNull Set<Principal> principals, @NotNull MoveTracker moveTracker) {
-                return ImmutableList.of(Mockito.mock(ValidatorProvider.class));
+                return ImmutableList.of(mock(ValidatorProvider.class));
             }
         };
         addConfiguration(withValidator);
@@ -323,7 +328,7 @@ public class CompositeConfigurationTest extends AbstractCompositeConfigurationTe
             @NotNull
             @Override
             public WorkspaceInitializer getWorkspaceInitializer() {
-                return Mockito.mock(WorkspaceInitializer.class);
+                return mock(WorkspaceInitializer.class);
             }
         };
         addConfiguration(withWorkspaceInitializer);
@@ -342,7 +347,7 @@ public class CompositeConfigurationTest extends AbstractCompositeConfigurationTe
             @NotNull
             @Override
             public RepositoryInitializer getRepositoryInitializer() {
-                return Mockito.mock(RepositoryInitializer.class);
+                return mock(RepositoryInitializer.class);
             }
         };
         addConfiguration(withRepositoryInitializer);
@@ -383,5 +388,28 @@ public class CompositeConfigurationTest extends AbstractCompositeConfigurationTe
         assertEquals(3, compositeParams.size());
         assertEquals(ImmutableSet.copyOf(ConfigurationParameters.of(params, params2).keySet()), ImmutableSet.copyOf(compositeParams.keySet()));
         assertEquals("valueA2", compositeParams.getConfigValue("a", "def"));
+    }
+
+    @Test
+    public void testGetMonitors() {
+        StatisticsProvider statisticsProvider = StatisticsProvider.NOOP;
+        assertTrue(Iterables.isEmpty(compositeConfiguration.getMonitors(statisticsProvider)));
+
+        addConfiguration(new SecurityConfiguration.Default());
+        assertTrue(Iterables.isEmpty(compositeConfiguration.getMonitors(statisticsProvider)));
+
+        Monitor<LoginModuleMonitor> monitor = mock(LoginModuleMonitor.class);
+        SecurityConfiguration withMonitors = new SecurityConfiguration.Default() {
+            @NotNull
+            @Override
+            public Iterable<Monitor<?>> getMonitors(@NotNull StatisticsProvider statisticsProvider) {
+                return ImmutableList.of(monitor);
+            }
+        };
+        addConfiguration(withMonitors);
+
+        Iterable<Monitor<?>> monitors = compositeConfiguration.getMonitors(statisticsProvider);
+        assertEquals(1, Iterables.size(monitors));
+        assertSame(monitor, monitors.iterator().next());
     }
 }

@@ -17,6 +17,8 @@ The following runmodes are currently available:
     * debug           : Print status information about an Oak repository
     * explore         : Starts a GUI browser based on java swing
     * export          : Export repository content as json
+    * frozennoderefsbyscanning : Scan for nt:frozenNode references via query
+    * frozennoderefsusingindex : Scan for nt:frozenNode references via /oak:index
     * garbage         : Identifies blob garbage on a DocumentMK repository
     * help            : Print a list of available runmodes
     * history         : Trace the history of a node
@@ -134,7 +136,47 @@ Explore
 The 'explore' mode starts a desktop browser GUI based on java swing which allows for read-only
 browsing of an existing oak repository.
 
-    $ java -jar oak-run-*.jar explore /path/to/oak/repository [skip-size-check]
+    $ java -jar oak-run-*.jar explore /path/to/oak/repository [--skip-size-check]
+
+Microsoft Azure node stores are also supported using the following command.  The secret key must be supplied as an environment variable `AZURE_SECRET_KEY`.  
+
+    $ java -jar oak-run-*.jar explore az:https://myaccount.blob.core.windows.net/container/repository [--skip-size-check]
+
+frozennoderefsbyscanning
+------------------------
+
+This command executes a potentially expensive (!) traversing query searching for
+all properties formatted as a UUID (incl String, Reference types) and verifies
+if they represent (potential) references to nt:frozenNode.
+
+Since this is a rather expensive command, consider using frozennoderefsusingindex
+(at least first) instead.
+
+If this is used eg on a MongoDB, consider running the command against
+a secondary MongoDB node, such as to not overload the primary MongoDB node.
+
+This tool is part of the effort to change the default nt:frozenNode node type
+definition to no longer be a mix:referenceable (see OAK-9134). Even though
+existing definitions aren't modified, the tool can be used to verify if
+an existing repository would potentially be in violation of OAK-9134 - ie if
+there are existing use cases of nt:frozenNode being a mix:referenceable.
+
+
+frozennoderefsusingindex
+------------------------
+
+This command browses through /oak:index/references and verifies if they
+represent references to nt:frozenNode.
+
+If this is used eg on a MongoDB, consider running the command against
+a secondary MongoDB node, such as to not overload the primary MongoDB node.
+
+This tool is part of the effort to change the default nt:frozenNode node type
+definition to no longer be a mix:referenceable (see OAK-9134). Even though
+existing definitions aren't modified, the tool can be used to verify if
+an existing repository would potentially be in violation of OAK-9134 - ie if
+there are existing use cases of nt:frozenNode being a mix:referenceable.
+
 
 History
 -------
@@ -565,6 +607,8 @@ The following operations are available:
     --check-consistency        - List all the missing blobs by doing a consistency check.
     --dump-ref                 - List all the blob references in the node store
     --dump-id                  - List all the ids in the data store
+    --get-metadata             - Retrieves a machine readable format GC datastore metadata
+                                 e.g. <repoId>|<earliestRef_start_timestamp_secs>|<earliestRef_mark_timestamp_secs>|[*-] * for local repo id
 
 The following options are available:
 
@@ -595,7 +639,10 @@ The following options are available:
     --export-metrics         - Option to export the captured metrics. The format of the command is type;URL;key1=value1,key2=value2
                               Currently only [Prometheus Pushgateway](https://github.com/prometheus/pushgateway) is supported
                               e.g. --export-metrics "pushgateway;localhost:9091;key1=value1,key2=value2" 
-
+    --sweep-only-refs-past-retention - Sweep only if the earliest references from all repositories are past the retention period which is govered by the max-age parameter.
+                                       Boolean (Optional). Defaults to False. Only applicable for --collect-garbage
+    --check-consistency-gc    - Performs a consistency check immediately after the GC.        
+                                Boolean (Optional). Defaults to False. Only applicable for --collect-garbage                           
 Note:
 
 Note: When using --export-metrics the following additional jars have to be downloaded to support Prometheus Pushgatway

@@ -32,8 +32,7 @@ import javax.jcr.SimpleCredentials;
 import javax.net.ssl.SSLContext;
 import javax.security.auth.login.LoginException;
 
-import org.apache.commons.pool.impl.GenericObjectPool;
-import org.apache.directory.api.ldap.codec.controls.search.pagedSearch.PagedResultsDecorator;
+import org.apache.commons.pool2.impl.DefaultPooledObject;
 import org.apache.directory.api.ldap.model.constants.SchemaConstants;
 import org.apache.directory.api.ldap.model.cursor.CursorException;
 import org.apache.directory.api.ldap.model.cursor.SearchCursor;
@@ -51,6 +50,7 @@ import org.apache.directory.api.ldap.model.message.SearchResultDone;
 import org.apache.directory.api.ldap.model.message.SearchResultEntry;
 import org.apache.directory.api.ldap.model.message.SearchScope;
 import org.apache.directory.api.ldap.model.message.controls.PagedResults;
+import org.apache.directory.api.ldap.model.message.controls.PagedResultsImpl;
 import org.apache.directory.api.ldap.model.name.Dn;
 import org.apache.directory.api.ldap.model.name.Rdn;
 import org.apache.directory.ldap.client.api.AbstractPoolableLdapConnectionFactory;
@@ -243,9 +243,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
                 log.warn("referenced identity is neither user or group: {}", ref.getString());
                 return null;
             }
-        } catch (LdapException e) {
-            throw lookupFailedException(e, null);
-        } catch (CursorException e) {
+        } catch (LdapException | CursorException e) {
             throw lookupFailedException(e, null);
         } finally {
             disconnect(connection);
@@ -260,9 +258,8 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
         try {
             Entry entry = getEntry(connection, config.getUserConfig(), userId, config.getCustomAttributes());
             timer.mark("lookup");
-            if (log.isDebugEnabled()) {
-                log.debug("getUser({}) {}", userId, timer.getString());
-            }
+            debug("getUser({}) {}", userId, timer.getString());
+
             if (entry != null) {
                 return createUser(entry, userId);
             } else {
@@ -283,9 +280,8 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
         try {
             Entry entry = getEntry(connection, config.getGroupConfig(), name, config.getCustomAttributes());
             timer.mark("lookup");
-            if (log.isDebugEnabled()) {
-                log.debug("getGroup({}) {}", name, timer.getString());
-            }
+            debug("getGroup({}) {}", name, timer.getString());
+
             if (entry != null) {
                 return createGroup(entry, name);
             } else {
@@ -335,7 +331,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
                         try {
                             return createGroup(iter.next(), null);
                         } catch (LdapInvalidAttributeValueException e) {
-                            log.warn("Error while creating external user object", e);
+                            log.warn("Error while creating external group object", e);
                         }
                     }
                     return null;
@@ -365,37 +361,43 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
             LdapConnection connection = null;
             try {
                 DebugTimer timer = new DebugTimer();
-                if (userPool == null) {
-                    connection = userConnectionFactory.makeObject();
-                } else {
-                    connection = userPool.getConnection();
-                }
+                connection = createUserConnection();
                 timer.mark("connect");
                 connection.bind(user.getEntry().getDn(), new String(creds.getPassword()));
-                //connection.bind(user.getExternalId().getId(), new String(creds.getPassword()));
                 timer.mark("bind");
-                if (log.isDebugEnabled()) {
-                    log.debug("authenticate({}) {}", user.getId(), timer.getString());
-                }
+                debug("authenticate({}) {}", user.getId(), timer.getString());
             } catch (LdapAuthenticationException e) {
                 throw new LoginException("Unable to authenticate against LDAP server: " + e.getMessage());
             } catch (Exception e) {
-                throw new ExternalIdentityException("Error while binding user credentials", e);
+                throw error(e, "Error while binding user credentials");
             } finally {
-                if (connection != null) {
-                    try {
-                        if (userPool == null) {
-                            userConnectionFactory.destroyObject(connection);
-                        } else {
-                            userPool.releaseConnection(connection);
-                        }
-                    } catch (Exception e) {
-                        // ignore
-                    }
-                }
+                disconnectUserConnection(connection);
             }
         }
         return user;
+    }
+
+    @NotNull
+    private LdapConnection createUserConnection() throws Exception {
+        if (userPool == null) {
+            return userConnectionFactory.create();
+        } else {
+            return userPool.getConnection();
+        }
+    }
+
+    private void disconnectUserConnection(@Nullable LdapConnection connection) {
+        if (connection != null) {
+            try {
+                if (userPool == null) {
+                    userConnectionFactory.destroyObject(connection);
+                } else {
+                    userPool.releaseConnection(connection);
+                }
+            } catch (Exception e) {
+                // ignore
+            }
+        }
     }
 
     //-----------------------------------------------------------< internal >---
@@ -423,11 +425,9 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
             req.setBase(new Dn(config.getGroupConfig().getBaseDN()));
             req.setFilter(searchFilter);
 
-            if (log.isDebugEnabled()) {
-                log.debug("getDeclaredGroupRefs: using SearchRequest {}.", req);
-            }
+            debug("getDeclaredGroupRefs: using SearchRequest {}.", req);
 
-            Map<String, ExternalIdentityRef> groups = new HashMap<String, ExternalIdentityRef>();
+            Map<String, ExternalIdentityRef> groups = new HashMap<>();
             DebugTimer timer = new DebugTimer();
             connection = connect();
             timer.mark("connect");
@@ -443,22 +443,14 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
                 }
             }
             timer.mark("iterate");
-            if (log.isDebugEnabled()) {
-                log.debug("getDeclaredGroupRefs: search below {} with {} found {} entries. {}",
+            debug("getDeclaredGroupRefs: search below {} with {} found {} entries. {}",
                         config.getGroupConfig().getBaseDN(), searchFilter, groups.size(), timer.getString());
-            }
+
             return groups;
         } catch (Exception e) {
-            log.error("Error during ldap membership search." ,e);
-            throw new ExternalIdentityException("Error during ldap membership search.", e);
+            throw error(e, "Error during ldap membership search.");
         } finally {
-            if (searchCursor != null) {
-                try {
-                    searchCursor.close();
-                } catch (IOException e) {
-                    log.warn("Failed to close search cursor.", e);
-                }
-            }
+            closeSearchCursor(searchCursor);
             disconnect(connection);
         }
     }
@@ -475,7 +467,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
         }
         LdapConnection connection = null;
         try {
-            Map<String, ExternalIdentityRef> members = new HashMap<String, ExternalIdentityRef>();
+            Map<String, ExternalIdentityRef> members = new HashMap<>();
             DebugTimer timer = new DebugTimer();
             connection = connect();
             timer.mark("connect");
@@ -491,14 +483,11 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
                 }
             }
             timer.mark("iterate");
-            if (log.isDebugEnabled()) {
-                log.debug("members lookup of {} found {} members. {}", ref.getId(), members.size(), timer.getString());
-            }
+            debug("members lookup of {} found {} members. {}", ref.getId(), members.size(), timer.getString());
+
             return members;
         } catch (Exception e) {
-            String msg = "Error during ldap group members lookup.";
-            log.error(msg ,e);
-            throw new ExternalIdentityException(msg, e);
+            throw error(e, "Error during ldap group members lookup.");
         } finally {
             disconnect(connection);
         }
@@ -538,8 +527,11 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
         if (config.getAdminPoolConfig().getMaxActive() != 0) {
             adminPool = new LdapConnectionPool(adminConnectionFactory);
             adminPool.setTestOnBorrow(true);
-            adminPool.setMaxActive(config.getAdminPoolConfig().getMaxActive());
-            adminPool.setWhenExhaustedAction(GenericObjectPool.WHEN_EXHAUSTED_BLOCK);
+            adminPool.setMaxTotal(config.getAdminPoolConfig().getMaxActive());
+            adminPool.setBlockWhenExhausted(true);
+            adminPool.setMinEvictableIdleTimeMillis(config.getAdminPoolConfig().getMinEvictableIdleTimeMillis());
+            adminPool.setTimeBetweenEvictionRunsMillis(config.getAdminPoolConfig().getTimeBetweenEvictionRunsMillis());
+            adminPool.setNumTestsPerEvictionRun(config.getAdminPoolConfig().getNumTestsPerEvictionRun());
         }
 
         // setup unbound connection pool. let's create a new version of the config
@@ -554,8 +546,11 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
         if (config.getUserPoolConfig().getMaxActive() != 0) {
             userPool = new UnboundLdapConnectionPool(userConnectionFactory);
             userPool.setTestOnBorrow(true);
-            userPool.setMaxActive(config.getUserPoolConfig().getMaxActive());
-            userPool.setWhenExhaustedAction(GenericObjectPool.WHEN_EXHAUSTED_BLOCK);
+            userPool.setMaxTotal(config.getUserPoolConfig().getMaxActive());
+            userPool.setBlockWhenExhausted(true);
+            userPool.setMinEvictableIdleTimeMillis(config.getUserPoolConfig().getMinEvictableIdleTimeMillis());
+            userPool.setTimeBetweenEvictionRunsMillis(config.getUserPoolConfig().getTimeBetweenEvictionRunsMillis());
+            userPool.setNumTestsPerEvictionRun(config.getUserPoolConfig().getNumTestsPerEvictionRun());
         }
 
         log.info("LdapIdentityProvider initialized: {}", config);
@@ -602,9 +597,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
         req.setBase(new Dn(idConfig.getBaseDN()));
         req.setFilter(searchFilter);
 
-        if (log.isDebugEnabled()) {
-            log.debug("getEntry: using SearchRequest {}.", req);
-        }
+        debug("getEntry: using SearchRequest {}.", req);
 
         // Process the request
         SearchCursor searchCursor = null;
@@ -623,20 +616,12 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
                 }
             }
         } finally {
-            if (searchCursor != null) {
-                try {
-                    searchCursor.close();
-                } catch (IOException e) {
-                    log.warn("Failed to close search cursor.", e);
-                }
-            }
+            closeSearchCursor(searchCursor);
         }
-        if (log.isDebugEnabled()) {
-            if (resultEntry == null) {
-                log.debug("getEntry: search below {} with {} found 0 entries.", idConfig.getBaseDN(), searchFilter);
-            } else {
-                log.debug("getEntry: search below {} with {} found {}", idConfig.getBaseDN(), searchFilter, resultEntry.getDn());
-            }
+        if (resultEntry == null) {
+            debug("getEntry: search below {} with {} found 0 entries.", idConfig.getBaseDN(), searchFilter);
+        } else {
+            debug("getEntry: search below {} with {} found {}", idConfig.getBaseDN(), searchFilter, resultEntry.getDn());
         }
         return resultEntry;
     }
@@ -670,7 +655,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
         private final LdapProviderConfig.Identity idConfig;
 
         private byte[] cookie;
-        private List page = Collections.emptyList();
+        private List<Entry> page = Collections.emptyList();
         private boolean searchComplete;
         private int pos = -1;
 
@@ -693,7 +678,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
         public Entry next() {
             if (hasNext()) {
                 try {
-                    Entry entry = (Entry) page.get(pos);
+                    Entry entry = page.get(pos);
                     findNextEntry();
                     return entry;
                 } catch (LdapException | CursorException | ExternalIdentityException e) {
@@ -710,7 +695,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
 
         //-------------------------------------------------------< internal >---
 
-        private SearchRequest createSearchRequest(LdapConnection connection, byte[] cookie, @NotNull String[] userAttributes) throws LdapException {
+        private SearchRequest createSearchRequest(byte[] cookie, @NotNull String[] userAttributes) throws LdapException {
             SearchRequest req = new SearchRequestImpl();
             req.setScope(SearchScope.SUBTREE);
             if (userAttributes.length == 0) {
@@ -722,11 +707,11 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
             req.setBase(new Dn(idConfig.getBaseDN()));
             req.setFilter(searchFilter);
 
-            PagedResults pagedSearchControl = new PagedResultsDecorator(connection.getCodecService());
             // do paged searches (OAK-2874)
-            pagedSearchControl.setSize(1000);
-            pagedSearchControl.setCookie(cookie);
-            req.addControl(pagedSearchControl);
+            PagedResultsImpl pagedResults = new PagedResultsImpl();
+            pagedResults.setSize(1000);
+            pagedResults.setCookie(cookie);
+            req.addControl(pagedResults);
 
             return req;
         }
@@ -739,12 +724,11 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
             DebugTimer timer = new DebugTimer();
             LdapConnection connection = connect();
             timer.mark("connect");
-            page = new ArrayList<Entry>();
+            page = new ArrayList<>();
             try {
-                SearchRequest req = createSearchRequest(connection, cookie, config.getCustomAttributes());
-                if (log.isDebugEnabled()) {
-                    log.debug("loadNextPage: using SearchRequest {}.", req);
-                }
+                SearchRequest req = createSearchRequest(cookie, config.getCustomAttributes());
+                debug("loadNextPage: using SearchRequest {}.", req);
+
                 searchCursor = connection.search(req);
                 while (searchCursor.next()) {
                     Response response = searchCursor.get();
@@ -752,33 +736,27 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
                     if (response instanceof SearchResultEntry) {
                         Entry resultEntry = ((SearchResultEntry) response).getEntry();
                         page.add(resultEntry);
-                        if (log.isDebugEnabled()) {
-                            log.debug("loadNextPage: search below {} with {} found {}", idConfig.getBaseDN(), searchFilter, resultEntry.getDn());
+                        debug("loadNextPage: search below {} with {} found {}", idConfig.getBaseDN(), searchFilter, resultEntry.getDn());
+                    }
+                }
+
+                boolean done = searchCursor.isDone();
+                cookie = null;
+                if (done) {
+                    SearchResultDone searchResultDone = searchCursor.getSearchResultDone();
+                    if (searchResultDone != null && searchResultDone.getLdapResult().getResultCode() != ResultCodeEnum.UNWILLING_TO_PERFORM) {
+                        PagedResults ctrl = (PagedResults) searchResultDone.getControl(PagedResults.OID);
+                        if (ctrl != null) {
+                            cookie = ctrl.getCookie();
                         }
                     }
                 }
-
-                SearchResultDone done = searchCursor.getSearchResultDone();
-                cookie = null;
-                if (done.getLdapResult().getResultCode() != ResultCodeEnum.UNWILLING_TO_PERFORM) {
-
-                    PagedResults ctrl = (PagedResults) done.getControl(PagedResults.OID);
-                    if (ctrl != null) {
-                        cookie = ctrl.getCookie();
-                    }
-                }
-                searchComplete = cookie == null;
+                searchComplete = cookie == null || cookie.length == 0;
                 timer.mark("lookup");
 
                 return !page.isEmpty();
             } finally {
-                if (searchCursor != null) {
-                    try {
-                        searchCursor.close();
-                    } catch (IOException e) {
-                        log.warn("Failed to close search cursor.", e);
-                    }
-                }
+                closeSearchCursor(searchCursor);
                 disconnect(connection);
             }
         }
@@ -842,8 +820,8 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
                 final Object propValue;
                 // for multivalue properties, store as collection
                 if (attr.size() > 1) {
-                    List<String> values = new ArrayList();
-                    for (Value<?> value : attr) {
+                    List<String> values = new ArrayList<>();
+                    for (Value value : attr) {
                         values.add(value.getString());
                     }
                     propValue = values;
@@ -859,14 +837,12 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
     private LdapConnection connect() throws ExternalIdentityException {
         try {
             if (adminPool == null) {
-                return adminConnectionFactory.makeObject();
+                return adminConnectionFactory.makeObject().getObject();
             } else {
                 return adminPool.getConnection();
             }
         } catch (Exception e) {
-            String msg = "Error while connecting to the ldap server.";
-            log.error(msg, e);
-            throw new ExternalIdentityException(msg, e);
+            throw error(e, "Error while connecting to the ldap server.");
         }
     }
 
@@ -874,7 +850,7 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
         try {
             if (connection != null) {
                 if (adminPool == null) {
-                    adminConnectionFactory.destroyObject(connection);
+                    adminConnectionFactory.destroyObject(new DefaultPooledObject<>(connection));
                 } else {
                     adminPool.releaseConnection(connection);
                 }
@@ -906,8 +882,29 @@ public class LdapIdentityProvider implements ExternalIdentityProvider, Principal
     }
 
     private static ExternalIdentityException lookupFailedException(@NotNull Exception e, @Nullable DebugTimer timer) {
-        String msg = "Error during ldap lookup. ";
-        log.error(msg + ((timer != null) ? timer.getString() : ""), e);
+        String msg = "Error during ldap lookup. {}";
+        log.error(msg, ((timer != null) ? timer.getString() : ""), e);
         return new ExternalIdentityException(msg, e);
+    }
+
+    private static ExternalIdentityException error(@NotNull Exception e, @NotNull String msg) {
+        log.error(msg, e);
+        return new ExternalIdentityException(msg, e);
+    }
+
+    private static void debug(@NotNull String msg, @NotNull Object... vars) {
+        if (log.isDebugEnabled()) {
+            log.debug(msg, vars);
+        }
+    }
+
+    private static void closeSearchCursor(@Nullable SearchCursor searchCursor) {
+        if (searchCursor != null) {
+            try {
+                searchCursor.close();
+            } catch (IOException e) {
+                log.warn("Failed to close search cursor.", e);
+            }
+        }
     }
 }

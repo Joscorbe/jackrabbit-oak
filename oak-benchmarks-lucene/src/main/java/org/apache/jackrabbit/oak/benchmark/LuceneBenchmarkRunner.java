@@ -19,30 +19,40 @@ package org.apache.jackrabbit.oak.benchmark;
 
 import org.apache.jackrabbit.oak.stats.StatisticsProvider;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 
 public class LuceneBenchmarkRunner extends BenchmarkRunner {
 
     public static void main(String[] args) throws Exception {
-        statsProvider = options.has(benchmarkOptions.getMetrics()) ? getStatsProvider() : StatisticsProvider.NOOP;
         initOptionSet(args);
+        statsProvider = options.has(benchmarkOptions.getMetrics()) ? getStatsProvider() : StatisticsProvider.NOOP;
         BenchmarkRunner.addToBenchMarkList(
                 Arrays.asList(
-                        new LuceneFullTextSearchTest(
+                        new LuceneFullTextWithGlobalIndexSearchTest(
                                 benchmarkOptions.getWikipedia().value(options),
                                 benchmarkOptions.getFlatStructure().value(options),
                                 benchmarkOptions.getReport().value(options),
                                 benchmarkOptions.getWithStorage().value(options)),
-                        new LucenePropertyFullTextTest(
+                        new LucenePropertyFTIndexedContentAvailability(
                                 benchmarkOptions.getWikipedia().value(options),
                                 benchmarkOptions.getFlatStructure().value(options),
                                 benchmarkOptions.getReport().value(options), benchmarkOptions.getWithStorage().value(options)),
-                        new LucenePropertyFTSeparated(
+                        new LucenePropertyFTSeparatedIndexedContentAvailability(
                                 benchmarkOptions.getWikipedia().value(options),
                                 benchmarkOptions.getFlatStructure().value(options),
                                 benchmarkOptions.getReport().value(options), benchmarkOptions.getWithStorage().value(options)),
-                        new HybridIndexTest(benchmarkOptions.getBase().value(options), statsProvider)
+                        new HybridIndexTest(benchmarkOptions.getBase().value(options), statsProvider),
+                        new LuceneFullTextWithoutGlobalIndexSearchTest(benchmarkOptions.getWikipedia().value(options),
+                                benchmarkOptions.getFlatStructure().value(options),
+                                benchmarkOptions.getReport().value(options),
+                                benchmarkOptions.getWithStorage().value(options)),
+                        new LucenePropertySearchTest(benchmarkOptions.getWikipedia().value(options),
+                                benchmarkOptions.getFlatStructure().value(options),
+                                benchmarkOptions.getReport().value(options),
+                                benchmarkOptions.getWithStorage().value(options)),
+                        new LuceneFacetSearchTest(benchmarkOptions.getWithStorage().value(options)),
+                        new LuceneInsecureFacetSearchTest(benchmarkOptions.getWithStorage().value(options)),
+                        new LuceneStatisticalFacetSearchTest(benchmarkOptions.getWithStorage().value(options))
                 )
         );
 

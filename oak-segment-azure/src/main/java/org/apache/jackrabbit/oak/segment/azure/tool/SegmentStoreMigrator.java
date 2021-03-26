@@ -93,6 +93,10 @@ public class SegmentStoreMigrator implements Closeable  {
     }
 
     private Void migrateJournal() throws IOException {
+        if (revisionCount == 0) {
+            log.info("Number of revisions configured to be copied is 0. Skip copying journal.");
+            return null;
+        }
         log.info("{}/journal.log -> {}", sourceName, targetName);
         if (!source.getJournalFile().exists()) {
             log.info("No journal at {}; skipping.", sourceName);
@@ -155,6 +159,13 @@ public class SegmentStoreMigrator implements Closeable  {
         SegmentArchiveManager targetManager = target.createArchiveManager(false, false, new IOMonitorAdapter(),
                 new FileStoreMonitorAdapter(), new RemoteStoreMonitorAdapter());
         List<String> targetArchives = targetManager.listArchives();
+
+        if (appendMode && !targetArchives.isEmpty()) {
+            //last archive can be updated since last copy and needs to be recopied
+            String lastArchive = targetArchives.get(targetArchives.size() - 1);
+            targetArchives.remove(lastArchive);
+        }
+
         for (String archiveName : sourceManager.listArchives()) {
             log.info("{}/{} -> {}", sourceName, archiveName, targetName);
             if (appendMode && targetArchives.contains(archiveName)) {
@@ -189,7 +200,7 @@ public class SegmentStoreMigrator implements Closeable  {
 
         for (Future<Segment> future : futures) {
             Segment segment = future.get();
-            segment.write(writer);
+            runWithRetry(() -> {segment.write(writer); return null;}, 16, 5);
         }
     }
 
@@ -198,7 +209,7 @@ public class SegmentStoreMigrator implements Closeable  {
         Buffer binaryReferences = future.get();
         if (binaryReferences != null) {
             byte[] array = fetchByteArray(binaryReferences);
-            writer.writeBinaryReferences(array);
+            runWithRetry(() -> {writer.writeBinaryReferences(array); return null;}, 16, 5);
         }
     }
 
@@ -213,7 +224,7 @@ public class SegmentStoreMigrator implements Closeable  {
         Buffer graph = future.get();
         if (graph != null) {
             byte[] array = fetchByteArray(graph);
-            writer.writeGraph(array);
+            runWithRetry(() -> {writer.writeGraph(array); return null;}, 16, 5);
         }
     }
 

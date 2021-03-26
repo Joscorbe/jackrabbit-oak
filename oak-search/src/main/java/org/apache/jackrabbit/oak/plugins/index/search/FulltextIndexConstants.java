@@ -138,6 +138,8 @@ public interface FulltextIndexConstants {
 
     String PROP_WEIGHT = "weight";
 
+    String PROP_DYNAMIC_BOOST = "dynamicBoost";
+
     /**
      * Boolean property in property definition to mark sync properties
      */
@@ -315,6 +317,16 @@ public interface FulltextIndexConstants {
     String COMPAT_MODE = "compatVersion";
 
     /**
+     * Name of the codec to be used for indexing
+     */
+    String CODEC_NAME = "codec";
+
+    /**
+     * Name of the merge policy to be used while indexing
+     */
+    String MERGE_POLICY_NAME = "mergePolicy";
+
+    /**
      * Optional (index definition) property indicating whether facets should be ACL checked.
      * Default is true
      */
@@ -328,6 +340,11 @@ public interface FulltextIndexConstants {
     String STATISTICAL_FACET_SAMPLE_SIZE_JVM_PARAM = "oak.facet.statistical.sampleSize";
     String PROP_STATISTICAL_FACET_SAMPLE_SIZE = "sampleSize";
     int STATISTICAL_FACET_SAMPLE_SIZE_DEFAULT = 1000;
+
+    /**
+     * Property name to specify the size of vectors used for similarity search.
+     */
+    String PROP_SIMILARITY_SEARCH_DENSE_VECTOR_SIZE = "similaritySearchDenseVectorSize";
 
     /**
      * Optional (index definition) property indicating max number of facets that will be retrieved

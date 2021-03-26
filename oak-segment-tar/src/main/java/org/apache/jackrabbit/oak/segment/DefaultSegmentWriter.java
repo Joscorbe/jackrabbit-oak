@@ -93,6 +93,8 @@ public class DefaultSegmentWriter implements SegmentWriter {
     private static final int CHILD_NODE_UPDATE_LIMIT = Integer
             .getInteger("child.node.update.limit", 10000);
 
+    protected static final String MAX_MAP_RECORD_SIZE_KEY = "oak.segmentNodeStore.maxMapRecordSize";
+
     @NotNull
     private final WriterCacheManager cacheManager;
 
@@ -110,19 +112,23 @@ public class DefaultSegmentWriter implements SegmentWriter {
 
     @NotNull
     private final WriteOperationHandler writeOperationHandler;
+    
+    private final int binariesInlineThreshold;
 
     /**
      * Create a new instance of a {@code SegmentWriter}. Note the thread safety
      * properties pointed out in the class comment.
      *
-     * @param store                 store to write to
-     * @param reader                segment reader for the {@code store}
-     * @param idProvider            segment id provider for the {@code store}
-     * @param blobStore             the blog store or {@code null} for inlined
-     *                              blobs
-     * @param cacheManager          cache manager instance for the
-     *                              de-duplication caches used by this writer
-     * @param writeOperationHandler handler for write operations.
+     * @param store                   store to write to
+     * @param reader                  segment reader for the {@code store}
+     * @param idProvider              segment id provider for the {@code store}
+     * @param blobStore               the blob store or {@code null} for inlined
+     *                                blobs
+     * @param cacheManager            cache manager instance for the
+     *                                de-duplication caches used by this writer
+     * @param writeOperationHandler   handler for write operations.
+     * @param binariesInlineThreshold threshold in bytes, specifying the limit up to which
+     *                                blobs will be inlined
      */
     public DefaultSegmentWriter(
             @NotNull SegmentStore store,
@@ -130,7 +136,8 @@ public class DefaultSegmentWriter implements SegmentWriter {
             @NotNull SegmentIdProvider idProvider,
             @Nullable BlobStore blobStore,
             @NotNull WriterCacheManager cacheManager,
-            @NotNull WriteOperationHandler writeOperationHandler
+            @NotNull WriteOperationHandler writeOperationHandler,
+            int binariesInlineThreshold
     ) {
         this.store = checkNotNull(store);
         this.reader = checkNotNull(reader);
@@ -138,6 +145,9 @@ public class DefaultSegmentWriter implements SegmentWriter {
         this.blobStore = blobStore;
         this.cacheManager = checkNotNull(cacheManager);
         this.writeOperationHandler = checkNotNull(writeOperationHandler);
+        checkArgument(binariesInlineThreshold >= 0);
+        checkArgument(binariesInlineThreshold <= Segment.MEDIUM_LIMIT);
+        this.binariesInlineThreshold = binariesInlineThreshold;
     }
 
     @Override
@@ -211,6 +221,8 @@ public class DefaultSegmentWriter implements SegmentWriter {
 
         private final Cache<String, RecordId> nodeCache;
 
+        private long lastLogTime;
+
         SegmentWriteOperation(@NotNull GCGeneration gcGeneration) {
             int generation = gcGeneration.getGeneration();
             this.gcGeneration = gcGeneration;
@@ -223,10 +235,51 @@ public class DefaultSegmentWriter implements SegmentWriter {
             return writer -> recordWriter.write(writer, store);
         }
 
-        private RecordId writeMap(@Nullable MapRecord base,
-                @NotNull Map<String, RecordId> changes
-        )
-                throws IOException {
+        private boolean shouldLog() {
+            long now = System.currentTimeMillis();
+            if (now - lastLogTime > 1000) {
+                lastLogTime = now;
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        private RecordId writeMap(@Nullable MapRecord base, @NotNull Map<String, RecordId> changes) throws IOException {
+            if (base != null) {
+                if (base.size() >= MapRecord.WARN_SIZE) {
+                    int maxMapRecordSize = Integer.getInteger(MAX_MAP_RECORD_SIZE_KEY, 0);
+                    if (base.size() > maxMapRecordSize) {
+                        System.setProperty(MAX_MAP_RECORD_SIZE_KEY, String.valueOf(base.size()));
+                    }
+
+                    if (base.size() >= MapRecord.ERROR_SIZE_HARD_STOP) {
+                        throw new UnsupportedOperationException("Map record has more than " + MapRecord.ERROR_SIZE_HARD_STOP
+                                        + " direct entries. Writing is not allowed. Please remove entries.");
+                    } else if (base.size() >= MapRecord.ERROR_SIZE_DISCARD_WRITES) {
+                        if (!Boolean.getBoolean("oak.segmentNodeStore.allowWritesOnHugeMapRecord")) {
+                            if (shouldLog()) {
+                                LOG.error(
+                                        "Map entry has more than {} entries. Writing more than {} entries (up to the hard limit of {}) is only allowed "
+                                                + "if the system property \"oak.segmentNodeStore.allowWritesOnHugeMapRecord\" is set",
+                                        MapRecord.ERROR_SIZE, MapRecord.ERROR_SIZE_DISCARD_WRITES, MapRecord.ERROR_SIZE_HARD_STOP);
+                            }
+
+                            throw new UnsupportedOperationException("Map record has more than " + MapRecord.ERROR_SIZE_DISCARD_WRITES
+                                            + " direct entries. Writing is not allowed. Please remove entries.");
+                        }
+                    } else if (base.size() >=  MapRecord.ERROR_SIZE) {
+                        if (shouldLog()) {
+                            LOG.error("Map entry has more than {} entries. Please remove entries.", MapRecord.ERROR_SIZE);
+                        }
+                    } else {
+                        if (shouldLog()) {
+                            LOG.warn("Map entry has more than {} entries. Please remove entries.", MapRecord.WARN_SIZE);
+                        }
+                    }
+                }
+            }
+
             if (base != null && base.isDiff()) {
                 Segment segment = base.getSegment();
                 RecordId key = segment.readRecordId(base.getRecordNumber(), 8);
@@ -289,6 +342,7 @@ public class DefaultSegmentWriter implements SegmentWriter {
         }
 
         private RecordId writeMapBranch(int level, int size, MapRecord... buckets) throws IOException {
+            checkElementIndex(size, MapRecord.MAX_SIZE);
             int bitmap = 0;
             List<RecordId> bucketIds = newArrayListWithCapacity(buckets.length);
             for (int i = 0; i < buckets.length; i++) {
@@ -592,11 +646,13 @@ public class DefaultSegmentWriter implements SegmentWriter {
         }
 
         private RecordId internalWriteStream(@NotNull InputStream stream) throws IOException {
-            // Special case for short binaries (up to about 16kB):
+            // Special case for short binaries (up to about binariesInlineThreshold, 16kB by default):
             // store them directly as small- or medium-sized value records
-            byte[] data = new byte[Segment.MEDIUM_LIMIT];
+                    	
+            byte[] data = new byte[binariesInlineThreshold];
             int n = read(stream, data, 0, data.length);
-            if (n < Segment.MEDIUM_LIMIT) {
+            
+            if (n < binariesInlineThreshold) {
                 return writeValueRecord(n, data);
             }
 
@@ -604,6 +660,17 @@ public class DefaultSegmentWriter implements SegmentWriter {
                 String blobId = blobStore.writeBlob(new SequenceInputStream(
                         new ByteArrayInputStream(data, 0, n), stream));
                 return writeBlobId(blobId);
+            }
+            
+            // handle case in which blob store is not configured and
+            // binariesInlineThreshold < Segment.MEDIUM_LIMIT
+            // store the binaries as small or medium sized value records 
+            
+            data = Arrays.copyOf(data, Segment.MEDIUM_LIMIT);
+            n += read(stream, data, n, Segment.MEDIUM_LIMIT - n);
+            
+            if (n < Segment.MEDIUM_LIMIT) {
+                return writeValueRecord(n, data);
             }
 
             data = Arrays.copyOf(data, Segment.MAX_SEGMENT_SIZE);

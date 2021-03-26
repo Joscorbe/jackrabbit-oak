@@ -23,7 +23,7 @@
   <parent>
     <groupId>org.apache.jackrabbit</groupId>
     <artifactId>oak-parent</artifactId>
-    <version>1.27-SNAPSHOT</version>
+    <version>1.39-SNAPSHOT</version>
     <relativePath>../oak-parent/pom.xml</relativePath>
   </parent>
 
@@ -53,13 +53,11 @@
       <!-- Locking : not fully implemented -->
       org.apache.jackrabbit.test.api.lock.LockTest#testNodeLocked <!-- OAK-3482 -->
       org.apache.jackrabbit.test.api.lock.LockTest#testAddRemoveLockToken <!-- OAK-2149 -->
-
+      org.apache.jackrabbit.test.api.lock.LockTest#testLockTransfer <!-- OAK-9187 -->
+      org.apache.jackrabbit.test.api.lock.LockTest#testOpenScopedLocks <!-- OAK-9187 -->
       org.apache.jackrabbit.test.api.lock.SetValueLockExceptionTest#testSetValueLockException  <!-- OAK-2149 -->
-
       org.apache.jackrabbit.test.api.lock.DeepLockTest#testRemoveLockedChild <!-- OAK-2149 -->
-
       org.apache.jackrabbit.test.api.lock.LockManagerTest#testRemoveLockToken3 <!-- OAK-2149 -->
-
       org.apache.jackrabbit.test.api.lock.SessionScopedLockTest#testImplicitUnlock
       org.apache.jackrabbit.test.api.lock.SessionScopedLockTest#testImplicitUnlock2
 
@@ -274,6 +272,12 @@
     </dependency>
     <dependency>
       <groupId>org.apache.jackrabbit</groupId>
+      <artifactId>oak-segment-aws</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.jackrabbit</groupId>
       <artifactId>oak-segment-azure</artifactId>
       <version>${project.version}</version>
       <scope>test</scope>
@@ -306,6 +310,13 @@
     <dependency>
       <groupId>org.apache.jackrabbit</groupId>
       <artifactId>oak-segment-tar</artifactId>
+      <version>${project.version}</version>
+      <type>test-jar</type>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.jackrabbit</groupId>
+      <artifactId>oak-segment-aws</artifactId>
       <version>${project.version}</version>
       <type>test-jar</type>
       <scope>test</scope>
@@ -466,6 +477,11 @@
       <groupId>net.lingala.zip4j</groupId>
       <artifactId>zip4j</artifactId>
       <version>1.3.2</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.mockito</groupId>
+      <artifactId>mockito-core</artifactId>
       <scope>test</scope>
     </dependency>
     

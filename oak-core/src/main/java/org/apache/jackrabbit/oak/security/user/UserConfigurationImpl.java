@@ -29,6 +29,8 @@ import org.apache.jackrabbit.oak.api.blob.BlobAccessProvider;
 import org.apache.jackrabbit.oak.namepath.NamePathMapper;
 import org.apache.jackrabbit.oak.plugins.value.jcr.PartialValueFactory;
 import org.apache.jackrabbit.oak.security.user.autosave.AutoSaveEnabledManager;
+import org.apache.jackrabbit.oak.security.user.monitor.UserMonitor;
+import org.apache.jackrabbit.oak.security.user.monitor.UserMonitorImpl;
 import org.apache.jackrabbit.oak.spi.commit.MoveTracker;
 import org.apache.jackrabbit.oak.spi.commit.ThreeWayConflictHandler;
 import org.apache.jackrabbit.oak.spi.commit.ValidatorProvider;
@@ -48,12 +50,15 @@ import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardAware;
 import org.apache.jackrabbit.oak.spi.whiteboard.WhiteboardUtils;
 import org.apache.jackrabbit.oak.spi.xml.ImportBehavior;
 import org.apache.jackrabbit.oak.spi.xml.ProtectedItemImporter;
+import org.apache.jackrabbit.oak.stats.Monitor;
+import org.apache.jackrabbit.oak.stats.StatisticsProvider;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.osgi.service.component.annotations.Activate;
 import org.osgi.service.component.annotations.Component;
 import org.osgi.service.component.annotations.Reference;
 import org.osgi.service.component.annotations.ReferenceCardinality;
+import org.osgi.service.component.annotations.ReferencePolicy;
 import org.osgi.service.metatype.annotations.AttributeDefinition;
 import org.osgi.service.metatype.annotations.Designate;
 import org.osgi.service.metatype.annotations.ObjectClassDefinition;
@@ -191,8 +196,19 @@ public class UserConfigurationImpl extends ConfigurationBase implements UserConf
         setParameters(ConfigurationParameters.of(properties));
     }
 
-    @Reference(cardinality = ReferenceCardinality.OPTIONAL)
+    private UserMonitor monitor = UserMonitor.NOOP;
+
     private BlobAccessProvider blobAccessProvider;
+    
+    @Reference(cardinality = ReferenceCardinality.OPTIONAL,
+            policy = ReferencePolicy.DYNAMIC)
+    void bindBlobAccessProvider(BlobAccessProvider bap) {
+        blobAccessProvider = bap;
+    }
+
+    void unbindBlobAccessProvider(BlobAccessProvider bap) {
+        blobAccessProvider = DEFAULT_BLOB_ACCESS_PROVIDER;
+    }
 
     //----------------------------------------------< SecurityConfiguration >---
     @NotNull
@@ -244,12 +260,18 @@ public class UserConfigurationImpl extends ConfigurationBase implements UserConf
         return UserContext.getInstance();
     }
 
+    @Override
+    public @NotNull Iterable<Monitor<?>> getMonitors(@NotNull StatisticsProvider statisticsProvider) {
+        monitor = new UserMonitorImpl(statisticsProvider);
+        return Collections.singleton(monitor);
+    }
+
     //--------------------------------------------------< UserConfiguration >---
     @NotNull
     @Override
     public UserManager getUserManager(Root root, NamePathMapper namePathMapper) {
         PartialValueFactory vf = new PartialValueFactory(namePathMapper, getBlobAccessProvider());
-        UserManager umgr = new UserManagerImpl(root, vf, getSecurityProvider());
+        UserManager umgr = new UserManagerImpl(root, vf, getSecurityProvider(), monitor);
         if (getParameters().getConfigValue(UserConstants.PARAM_SUPPORT_AUTOSAVE, false)) {
             return new AutoSaveEnabledManager(umgr, root);
         } else {
@@ -262,9 +284,7 @@ public class UserConfigurationImpl extends ConfigurationBase implements UserConf
     public PrincipalProvider getUserPrincipalProvider(@NotNull Root root, @NotNull NamePathMapper namePathMapper) {
         return new UserPrincipalProvider(root, this, namePathMapper);
     }
-
-    //-----------------------------------------------------------< internal >---
-
+    
     @NotNull
     private BlobAccessProvider getBlobAccessProvider() {
         BlobAccessProvider provider = blobAccessProvider;
@@ -279,8 +299,8 @@ public class UserConfigurationImpl extends ConfigurationBase implements UserConf
         }
         if (provider == null) {
             provider = DEFAULT_BLOB_ACCESS_PROVIDER;
-            blobAccessProvider = provider;
         }
+        blobAccessProvider = provider;
         return provider;
     }
 }

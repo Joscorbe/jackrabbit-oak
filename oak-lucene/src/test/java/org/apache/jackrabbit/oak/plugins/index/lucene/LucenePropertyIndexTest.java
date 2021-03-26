@@ -71,7 +71,7 @@ import org.apache.jackrabbit.oak.plugins.index.fulltext.ExtractedText;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.ExtractedText.ExtractionResult;
 import org.apache.jackrabbit.oak.plugins.index.fulltext.PreExtractedTextProvider;
 import org.apache.jackrabbit.oak.plugins.index.lucene.directory.CopyOnReadDirectory;
-import org.apache.jackrabbit.oak.plugins.index.lucene.util.IndexDefinitionBuilder;
+import org.apache.jackrabbit.oak.plugins.index.lucene.util.LuceneIndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.index.lucene.util.fv.SimSearchUtils;
 import org.apache.jackrabbit.oak.plugins.index.nodetype.NodeTypeIndexProvider;
 import org.apache.jackrabbit.oak.plugins.index.property.PropertyIndexEditorProvider;
@@ -79,6 +79,7 @@ import org.apache.jackrabbit.oak.plugins.index.search.ExtractedTextCache;
 import org.apache.jackrabbit.oak.plugins.index.search.FulltextIndexConstants;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexDefinition;
 import org.apache.jackrabbit.oak.plugins.index.search.IndexFormatVersion;
+import org.apache.jackrabbit.oak.plugins.index.search.util.IndexDefinitionBuilder;
 import org.apache.jackrabbit.oak.plugins.memory.ArrayBasedBlob;
 import org.apache.jackrabbit.oak.plugins.memory.MemoryNodeStore;
 import org.apache.jackrabbit.oak.plugins.memory.PropertyStates;
@@ -760,7 +761,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     public void orderByScoreAcrossUnion() throws Exception {
         Tree idx = root.getTree("/").addChild(INDEX_DEFINITIONS_NAME).addChild("test-index");
-        IndexDefinitionBuilder builder = new IndexDefinitionBuilder();
+        IndexDefinitionBuilder builder = new LuceneIndexDefinitionBuilder();
         builder.evaluatePathRestrictions();
         builder.indexRule("nt:base")
                 .property("foo").analyzed().propertyIndex().nodeScopeIndex()
@@ -928,8 +929,8 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void sortOnNodeName() throws Exception {
         Tree rootTree = root.getTree("/").addChild("test");
 
-        IndexDefinitionBuilder fnNameFunctionIndex = new IndexDefinitionBuilder().noAsync();
-        IndexDefinitionBuilder.PropertyRule rule = fnNameFunctionIndex.indexRule("nt:base")
+        IndexDefinitionBuilder fnNameFunctionIndex = new LuceneIndexDefinitionBuilder().noAsync();
+        LuceneIndexDefinitionBuilder.PropertyRule rule = fnNameFunctionIndex.indexRule("nt:base")
                 .property("nodeName", null)
                 .propertyIndex()
                 .ordered();
@@ -983,7 +984,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void sortOnLocalName() throws Exception {
         Tree rootTree = root.getTree("/").addChild("test");
 
-        IndexDefinitionBuilder fnNameFunctionIndex = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder fnNameFunctionIndex = new LuceneIndexDefinitionBuilder().noAsync();
         IndexDefinitionBuilder.PropertyRule rule = fnNameFunctionIndex.indexRule("nt:base")
                 .property("nodeName", null)
                 .propertyIndex()
@@ -1251,7 +1252,57 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         assertQuery("select [jcr:path] from [nt:base] where propa like '%ty'",
                 asList("/test/a", "/test/b"));
         assertQuery("select [jcr:path] from [nt:base] where propa like '%ump%'",
-            asList("/test/a", "/test/b", "/test/c"));
+                asList("/test/a", "/test/b", "/test/c"));
+    }
+
+    @Test
+    public void likeQueriesWithEscapedChars() throws Exception {
+        Tree idx = createIndex("test1", of("propa", "propb"));
+        idx.addChild(PROP_NODE).addChild("propa");
+        root.commit();
+
+        Tree test = root.getTree("/").addChild("test");
+        test.addChild("a").setProperty("propa", "foo%");
+        test.addChild("b").setProperty("propa", "%bar");
+        test.addChild("c").setProperty("propa", "foo%bar");
+        test.addChild("d").setProperty("propa", "foo_");
+        test.addChild("e").setProperty("propa", "_foo");
+        test.addChild("f").setProperty("propa", "foo_bar");
+        test.addChild("g").setProperty("propa", "foo%_bar");
+        test.addChild("h").setProperty("propa", "foo\\bar");
+        test.addChild("i").setProperty("propa", "foo\\\\%bar");
+        root.commit();
+
+        assertQuery("select [jcr:path] from [nt:base] where propa like 'foo%'",
+                asList("/test/a", "/test/c", "/test/d", "/test/f", "/test/g", "/test/h", "/test/i"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like '%oo%'",
+                asList("/test/a", "/test/c", "/test/d", "/test/e", "/test/f", "/test/g", "/test/h", "/test/i"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like 'foo\\%'",
+                asList("/test/a"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like '%oo\\%'",
+                asList("/test/a"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like '%oo\\%%'",
+                asList("/test/a", "/test/c", "/test/g"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like '\\%b%'",
+                asList("/test/b"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like 'foo_'",
+                asList("/test/a", "/test/d"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like '_oo_'",
+                asList("/test/a", "/test/d"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like 'foo\\_'",
+                asList("/test/d"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like '%oo\\_'",
+                asList("/test/d"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like '%oo\\_%'",
+                asList("/test/d", "/test/f"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like '%oo\\%\\_%'",
+                asList("/test/g"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like 'foo\\\\bar'",
+                asList("/test/h"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like '%\\\\%'",
+                asList("/test/h", "/test/i"));
+        assertQuery("select [jcr:path] from [nt:base] where propa like '%\\\\\\%%'",
+                asList("/test/i"));
     }
 
     @Test
@@ -2695,7 +2746,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         //Flush the changes to nodetypes
         root.commit();
 
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("oak:TestSuperType").property(JcrConstants.JCR_PRIMARYTYPE).propertyIndex();
         idxb.indexRule("oak:TestMixA").property(JcrConstants.JCR_MIXINTYPES).propertyIndex();
         idxb.indexRule("oak:TestMixA").property(JcrConstants.JCR_PRIMARYTYPE).propertyIndex();
@@ -2739,7 +2790,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         //Flush the changes to nodetypes
         root.commit();
 
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.nodeTypeIndex();
         idxb.indexRule("oak:TestSuperType");
         idxb.indexRule("oak:TestMixA");
@@ -2764,7 +2815,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void indexDefinitionModifiedPostReindex() throws Exception{
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
         idxb.build(idx);
@@ -2793,7 +2844,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void refreshIndexDefinition() throws Exception{
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
         idxb.build(idx);
@@ -2828,7 +2879,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void updateOldIndexDefinition() throws Exception{
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
         idxb.build(idx);
@@ -2859,7 +2910,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     public void disableIndexDefnStorage() throws Exception{
         IndexDefinition.setDisableStoredIndexDefinition(true);
 
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
         idxb.build(idx);
@@ -2875,7 +2926,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void storedIndexDefinitionDiff() throws Exception{
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
         idxb.build(idx);
@@ -2902,7 +2953,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void relativeProperties() throws Exception{
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
 
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
@@ -2927,7 +2978,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     public void testRepSimilarWithBinaryFeatureVectors() throws Exception {
 
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("fv").useInSimilarity().nodeScopeIndex().propertyIndex();
 
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
@@ -2983,7 +3034,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     public void testRepSimilarWithStringFeatureVectors() throws Exception {
 
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("fv").useInSimilarity().nodeScopeIndex().propertyIndex();
 
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
@@ -3027,7 +3078,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     public void testRepSimilarWithBinaryFeatureVectorsAndRerank() throws Exception {
 
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("fv").useInSimilarity(true).nodeScopeIndex().propertyIndex();
 
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
@@ -3083,7 +3134,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
     @Test
     public void testRepSimilarWithStringFeatureVectorsAndRerank() throws Exception {
 
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("fv").useInSimilarity(true).nodeScopeIndex().propertyIndex();
 
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
@@ -3127,7 +3178,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void injectRandomSeedDuringReindex() throws Exception{
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
         idxb.build(idx);
@@ -3148,7 +3199,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void injectRandomSeedDuringRefresh() throws Exception{
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
         idxb.build(idx);
@@ -3173,7 +3224,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void injectRandomSeedDuringUpdate() throws Exception{
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
         idxb.build(idx);
@@ -3197,7 +3248,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void injectGarbageSeed() throws Exception {
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
         idxb.build(idx);
@@ -3224,7 +3275,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void injectStringLongSeed() throws Exception {
-        IndexDefinitionBuilder idxb = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxb = new LuceneIndexDefinitionBuilder().noAsync();
         idxb.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("test1");
         idxb.build(idx);
@@ -3245,7 +3296,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
 
     @Test
     public void pathTransformationWithWildcardInRelativePathFragment() throws Exception {
-        IndexDefinitionBuilder idxBuilder = new IndexDefinitionBuilder().noAsync();
+        IndexDefinitionBuilder idxBuilder = new LuceneIndexDefinitionBuilder().noAsync();
         idxBuilder.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("fooIndex");
         idxBuilder.build(idx);
@@ -3315,7 +3366,7 @@ public class LucenePropertyIndexTest extends AbstractQueryTest {
         // we're interested in how many constraint could the index resolve.. so those results would be super-set of
         // what we see here
 
-        IndexDefinitionBuilder idxBuilder = new IndexDefinitionBuilder()
+        IndexDefinitionBuilder idxBuilder = new LuceneIndexDefinitionBuilder()
                 .noAsync().evaluatePathRestrictions();
         idxBuilder.indexRule("nt:base").property("foo").propertyIndex();
         Tree idx = root.getTree("/").getChild("oak:index").addChild("fooIndex");

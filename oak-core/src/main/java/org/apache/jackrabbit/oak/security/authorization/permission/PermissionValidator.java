@@ -113,8 +113,7 @@ class PermissionValidator extends DefaultValidator {
     public void propertyChanged(PropertyState before, PropertyState after) throws CommitFailedException {
         String name = after.getName();
         if (TreeConstants.OAK_CHILD_ORDER.equals(name)) {
-            String childName = ChildOrderDiff.firstReordered(before, after);
-            if (childName != null) {
+            if (ChildOrderDiff.isReordered(before, after)) {
                 checkPermissions(parentAfter, false, Permissions.MODIFY_CHILD_NODE_COLLECTION);
             } // else: no re-order but only internal update
         } else if (isImmutableProperty(name, parentAfter)) {
@@ -139,6 +138,7 @@ class PermissionValidator extends DefaultValidator {
         if (isVersionstorageTree(child)) {
             child = getVersionHistoryTree(child);
             if (child == null) {
+                provider.getAccessMonitor().accessViolation();
                 throw new CommitFailedException(
                         ACCESS, 21, "New version storage node without version history: cannot verify permissions.");
             }
@@ -158,6 +158,7 @@ class PermissionValidator extends DefaultValidator {
     public Validator childNodeDeleted(String name, NodeState before) throws CommitFailedException {
         Tree child = parentBefore.getChild(name);
         if (isVersionstorageTree(child)) {
+            provider.getAccessMonitor().accessViolation();
             throw new CommitFailedException(
                     ACCESS, 22, "Attempt to remove versionstorage node: Fail to verify delete permission.");
         }
@@ -198,16 +199,12 @@ class PermissionValidator extends DefaultValidator {
                                long defaultPermission) throws CommitFailedException {
         long toTest = getPermission(tree, defaultPermission);
         if (Permissions.isRepositoryPermission(toTest)) {
-            if (!permissionProvider.getRepositoryPermission().isGranted(toTest)) {
-                throw new CommitFailedException(ACCESS, 0, "Access denied");
-            }
+            checkIsGranted(permissionProvider.getRepositoryPermission().isGranted(toTest));
             return null; // no need for further validation down the subtree
         } else {
             NodeState ns = provider.getTreeProvider().asNodeState(tree);
             TreePermission tp = parentPermission.getChildPermission(tree.getName(), ns);
-            if (!tp.isGranted(toTest)) {
-                throw new CommitFailedException(ACCESS, 0, "Access denied");
-            }
+            checkIsGranted(tp.isGranted(toTest));
             if (noTraverse(toTest, defaultPermission)) {
                 return null;
             } else {
@@ -228,15 +225,10 @@ class PermissionValidator extends DefaultValidator {
         }
         long toTest = getPermission(parent, property, defaultPermission);
         if (toTest != Permissions.NO_PERMISSION) {
-            boolean isGranted;
             if (Permissions.isRepositoryPermission(toTest)) {
-                isGranted = permissionProvider.getRepositoryPermission().isGranted(toTest);
+                checkIsGranted(permissionProvider.getRepositoryPermission().isGranted(toTest));
             } else {
-                isGranted = parentPermission.isGranted(toTest, property);
-            }
-
-            if (!isGranted) {
-                throw new CommitFailedException(ACCESS, 0, "Access denied");
+                checkIsGranted(parentPermission.isGranted(toTest, property));
             }
         }
     }
@@ -355,5 +347,12 @@ class PermissionValidator extends DefaultValidator {
 
     private boolean isIndexDefinition(@NotNull Tree tree) {
         return tree.getPath().contains(IndexConstants.INDEX_DEFINITIONS_NAME);
+    }
+
+    void checkIsGranted(boolean isGranted) throws CommitFailedException {
+        if (!isGranted) {
+            provider.getAccessMonitor().accessViolation();
+            throw new CommitFailedException(ACCESS, 0, "Access denied");
+        }
     }
 }

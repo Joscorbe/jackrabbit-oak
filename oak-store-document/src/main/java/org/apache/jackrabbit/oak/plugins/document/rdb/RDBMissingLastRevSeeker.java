@@ -19,6 +19,7 @@
 
 package org.apache.jackrabbit.oak.plugins.document.rdb;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
@@ -26,6 +27,7 @@ import org.apache.jackrabbit.oak.plugins.document.Collection;
 import org.apache.jackrabbit.oak.plugins.document.MissingLastRevSeeker;
 import org.apache.jackrabbit.oak.plugins.document.NodeDocument;
 import org.apache.jackrabbit.oak.plugins.document.rdb.RDBDocumentStore.QueryCondition;
+import org.apache.jackrabbit.oak.plugins.document.util.SystemPropertySupplier;
 import org.apache.jackrabbit.oak.stats.Clock;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -40,34 +42,13 @@ public class RDBMissingLastRevSeeker extends MissingLastRevSeeker {
 
     // 1: seek using historical, paging mode
     // 2: use custom single query directly using RDBDocumentStore API
-    private static final int MODE;
-
     private static final int DEFAULTMODE = 2;
 
-    static {
-        String propName = "org.apache.jackrabbit.oak.plugins.document.rdb.RDBMissingLastRevSeeker.MODE";
-        String value = System.getProperty(propName, "");
-        switch (value) {
-            case "":
-                MODE = DEFAULTMODE;
-                break;
-            case "1":
-                MODE = 1;
-                break;
-            case "2":
-                MODE = 2;
-                break;
-            default:
-                LOG.error("Ignoring unexpected value '" + value + "' for system property " + propName);
-                MODE = DEFAULTMODE;
-                break;
-        }
-
-        if (DEFAULTMODE != MODE) {
-            LOG.info("Strategy for " + RDBMissingLastRevSeeker.class.getName() + " set to " + MODE + " (via system property "
-                    + propName + ")");
-        }
-    }
+    private static final int MODE = SystemPropertySupplier.create(RDBMissingLastRevSeeker.class.getName() + ".MODE", DEFAULTMODE)
+            .loggingTo(LOG).validateWith(value -> (value == 1 || value == 2)).formatSetMessage((name, value) -> {
+                return String.format("Strategy for %s set to %s (via system property %s)", RDBMissingLastRevSeeker.class.getName(),
+                        name, value);
+            }).get();
 
     private final RDBDocumentStore store;
 
@@ -83,8 +64,9 @@ public class RDBMissingLastRevSeeker extends MissingLastRevSeeker {
         if (MODE == 1) {
             return super.getCandidates(startTime);
         } else {
-            List<QueryCondition> conditions = Collections.singletonList(
-                    new QueryCondition(NodeDocument.MODIFIED_IN_SECS, ">=", NodeDocument.getModifiedInSecs(startTime)));
+            List<QueryCondition> conditions = new ArrayList<>();
+            conditions.add(new QueryCondition(NodeDocument.MODIFIED_IN_SECS, ">=", NodeDocument.getModifiedInSecs(startTime)));
+            conditions.add(new QueryCondition(NodeDocument.SD_TYPE, "is null"));
             return store.queryAsIterable(Collection.NODES, null, null, RDBDocumentStore.EMPTY_KEY_PATTERN, conditions,
                     Integer.MAX_VALUE, null);
         }
