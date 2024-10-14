@@ -101,6 +101,7 @@ public class VersionGCSupport {
                                                   @NotNull final String fromId,
                                                   @NotNull final Set<String> includePaths,
                                                   @NotNull final Set<String> excludePaths) {
+        LOG.info("getModifiedDocs fromModified: {}, toModified: {}, limit: {}, fromId: {}", fromModified, toModified, limit, fromId);
         // (_modified = fromModified && _id > fromId || _modified > fromModified && _modified < toModified)
         final Stream<NodeDocument> s1 = StreamSupport.stream(getSelectedDocuments(store,
                 MODIFIED_IN_SECS, 1, fromId, includePaths, excludePaths).spliterator(), false)
@@ -110,6 +111,7 @@ public class VersionGCSupport {
                 MODIFIED_IN_SECS, 1, includePaths, excludePaths).spliterator(), false)
                 .filter(input -> modifiedGreaterThan(input, fromModified) && modifiedLessThan(input, toModified));
 
+        LOG.info("s1: {}, s2: {}", s1.count(), s2.count());
         return concat(s1, s2)
                 .sorted((o1, o2) -> comparing(NodeDocument::getModified).thenComparing(Document::getId).compare(o1, o2))
                 .limit(limit)

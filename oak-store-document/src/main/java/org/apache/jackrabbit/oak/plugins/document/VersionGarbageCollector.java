@@ -288,6 +288,7 @@ public class VersionGarbageCollector {
      * would result in full scans - which results in bad performance.
      */
     void setFullGCPaths(@NotNull Set<String> includes, @NotNull Set<String> excludes) {
+        AUDIT_LOG.info("Setting Full GC paths to include: {} and exclude: {}", includes, excludes);
         this.fullGCIncludePaths = requireNonNull(includes);
         this.fullGCExcludePaths = requireNonNull(excludes);
         AUDIT_LOG.info("Full GC paths set to include: {} and exclude: {} in mode {}", includes, excludes, fullGcMode);
@@ -786,6 +787,7 @@ public class VersionGarbageCollector {
         private VersionGCStats gc(long maxRevisionAgeInMillis) throws IOException {
             VersionGCStats stats = new VersionGCStats();
             stats.active.start();
+            log.debug("Starting revision garbage collection");
             VersionGCRecommendations rec = new VersionGCRecommendations(maxRevisionAgeInMillis, nodeStore.getCheckpoints(),
                     !nodeStore.isReadOnlyMode(), nodeStore.getClock(), versionStore, options, gcMonitor, fullGCEnabled,
                     isFullGCDryRun);
@@ -828,6 +830,7 @@ public class VersionGarbageCollector {
                 }
 
             } catch (LimitExceededException ex) {
+                log.debug("Revision garbage collection limit exceeded", ex);
                 stats.limitExceeded = true;
             } finally {
                 phases.close();
@@ -864,6 +867,9 @@ public class VersionGarbageCollector {
          */
         private void collectFullGC(final GCPhases phases, final RevisionVector headRevision, final VersionGCRecommendations rec) {
 
+            log.info("Starting full garbage collection from {} to {} with Id starting from {}",
+                    timestampToString(rec.scopeFullGC.fromMs), timestampToString(rec.scopeFullGC.toMs), rec.fullGCId);
+            log.debug("Full GC includes: {} and excludes: {}", fullGCIncludePaths, fullGCExcludePaths);
             final long oldestModifiedMs = rec.scopeFullGC.fromMs;
             final long toModifiedMs = rec.scopeFullGC.toMs;
             final String oldestModifiedDocId = rec.fullGCId;
@@ -893,6 +899,8 @@ public class VersionGarbageCollector {
                         Iterable<NodeDocument> itr = versionStore.getModifiedDocs(fromModifiedMs, toModifiedMs, FULL_GC_BATCH_SIZE, fromId, fullGCIncludePaths, fullGCExcludePaths);
                         try {
                             for (NodeDocument doc : itr) {
+                                log.debug("Full GC: Processing document with path: {}", doc.getPath());
+                                AUDIT_LOG.debug("Full GC: Processing document with path: {}", doc.getPath());
                                 foundDoc = true;
                                 // continue with GC?
                                 if (cancel.get()) {
@@ -1137,6 +1145,9 @@ public class VersionGarbageCollector {
         }
 
         public void collectGarbage(final NodeDocument doc, final GCPhases phases) {
+            AUDIT_LOG.debug("<Collecting> Garbage in doc [{}]", doc.getId());
+            log.debug("Collecting Garbage in doc [{}]", doc.getId());
+
             if (fullGcMode == NONE) {
                 monitor.warn("Skipping FullGC. No Mode has been selected.");
                 return;

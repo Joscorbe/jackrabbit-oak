@@ -890,11 +890,15 @@ public class Utils {
             @NotNull final Set<String> includePaths,
             @NotNull final Set<String> excludePaths,
             final int batchSize) {
+        LOG.debug("Getting documents with indexedProperty {} and startValue {}",
+                indexedProperty, startValue);
         if (batchSize < 2) {
+            LOG.error("Batch size must be > 1");
             throw new IllegalArgumentException("batchSize must be > 1");
         }
         if ((store instanceof MongoDocumentStore)
                 && (!includePaths.isEmpty() || !excludePaths.isEmpty())) {
+            LOG.error("Cannot use include/exclude paths with MongoDocumentStore include {} exclude {}", includePaths, excludePaths);
             throw new IllegalArgumentException("cannot use with MongoDocumentStore");
         }
         return new Iterable<NodeDocument>() {
@@ -911,9 +915,11 @@ public class Utils {
                         do {
                             final NodeDocument n = doComputeNext();
                             if (n == null) {
+                                LOG.debug("No more documents");
                                 return null;
                             }
                             if (isIncluded(n.getPath(), includePaths, excludePaths)) {
+                                LOG.debug("Returning document {}", n.getId());
                                 return n;
                             }
                             // else repeat
@@ -947,6 +953,7 @@ public class Utils {
                         List<NodeDocument> result = indexedProperty == null ? store.query(Collection.NODES, startId,
                                 NodeDocument.MAX_ID_VALUE, batchSize) : store.query(Collection.NODES, startId,
                                 NodeDocument.MAX_ID_VALUE, indexedProperty, startValue, batchSize);
+                        LOG.debug("List of documents {}", result);
                         return result.iterator();
                     }
                 };

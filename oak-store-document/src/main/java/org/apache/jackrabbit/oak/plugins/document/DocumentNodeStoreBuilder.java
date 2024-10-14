@@ -310,11 +310,13 @@ public class DocumentNodeStoreBuilder<T extends DocumentNodeStoreBuilder<T>> {
     }
 
     public T setFullGCIncludePaths(@Nullable String[] includePaths) {
+        LOG.debug("Setting full GC include paths to {} {}", includePaths, Arrays.toString(includePaths));
         if (isNull(includePaths) || includePaths.length == 0 || Arrays.equals(includePaths, new String[]{"/"})) {
             this.fullGCIncludePaths = Set.of();
         } else {
             this.fullGCIncludePaths = Arrays.stream(includePaths).filter(Objects::nonNull).filter(PathUtils::isValid).collect(toUnmodifiableSet());;
         }
+        LOG.debug("Full GC include paths set to {}", this.fullGCIncludePaths);
         return thisBuilder();
     }
 

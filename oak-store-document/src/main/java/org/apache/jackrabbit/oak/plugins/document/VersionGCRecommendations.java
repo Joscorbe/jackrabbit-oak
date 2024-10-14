@@ -124,6 +124,8 @@ public class VersionGCRecommendations {
         this.originalCollectLimit = options.collectLimit;
         this.fullGCEnabled = fullGCEnabled;
         this.isFullGCDryRun = isFullGCDryRun;
+        log.debug("Full GC enabled: {}, Full GC Dry Run: {}, Mqax Revision Age: {}, Collect Limit: {}",
+                fullGCEnabled, isFullGCDryRun, maxRevisionAgeMs, collectLimit);
 
         TimeInterval keep = new TimeInterval(clock.getTime() - maxRevisionAgeMs, Long.MAX_VALUE);
 
@@ -181,6 +183,7 @@ public class VersionGCRecommendations {
                 setVGCSetting(of(SETTINGS_COLLECTION_FULL_GC_TIMESTAMP_PROP, oldestModifiedDocTimeStamp.get(),
                         SETTINGS_COLLECTION_FULL_GC_DOCUMENT_ID_PROP, oldestModifiedDocId));
             } else {
+                log.debug("fullGCTimestamp found: {}", timestampToString(fullGCTimestamp));
                 oldestModifiedDocTimeStamp.set(fullGCTimestamp);
             }
         }
@@ -188,6 +191,7 @@ public class VersionGCRecommendations {
         TimeInterval scopeFullGC = new TimeInterval(isFullGCDryRun ? oldestModifiedDryRunDocTimeStamp.get() :
                 oldestModifiedDocTimeStamp.get(), MAX_VALUE);
         scopeFullGC = scopeFullGC.notLaterThan(keep.fromMs);
+        log.debug("scopeFullGC: {}", scopeFullGC);
 
         suggestedIntervalMs = (long) settings.get(SETTINGS_COLLECTION_REC_INTERVAL_PROP);
         if (suggestedIntervalMs > 0) {
