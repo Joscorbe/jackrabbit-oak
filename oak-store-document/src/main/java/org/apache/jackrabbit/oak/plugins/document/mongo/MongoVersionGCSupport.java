@@ -134,6 +134,7 @@ public class MongoVersionGCSupport extends VersionGCSupport {
 
     @Override
     public CloseableIterable<NodeDocument> getPossiblyDeletedDocs(final long fromModified, final long toModified) {
+        LOG.info("getPossiblyDeletedDocs fromModified: {}, toModified: {}", fromModified, toModified);
         //_deletedOnce == true && _modified >= fromModified && _modified < toModified
         Bson query = Filters.and(
                 Filters.eq(DELETED_ONCE, true),
@@ -167,6 +168,7 @@ public class MongoVersionGCSupport extends VersionGCSupport {
      * AND the provided query
      */
     private Bson withIncludeExcludes(@NotNull Set<String> includes, @NotNull Set<String> excludes, Bson query) {
+        LOG.info("withIncludeExcludes() <- includes: {}, excludes: {}", includes, excludes);
         Bson inclExcl = null;
         if (!includes.isEmpty()) {
             final List<Bson> ors = new ArrayList<>(includes.size());
@@ -189,10 +191,12 @@ public class MongoVersionGCSupport extends VersionGCSupport {
             // if no include or exclude path prefixes are defined,
             // then everything is included - i.e. we fall back to
             // just the provided query
+            LOG.info("withIncludeExcludes() -> no include/exclude path prefixes defined, returning query {}", query);
             return query;
         } else {
             // if there are include or exclude path prefixes,
             // then add them via AND
+            LOG.info("withIncludeExcludes() -> include/exclude path prefixes defined, returning combined query {}", and(inclExcl, query));
             return and(inclExcl, query);
         }
     }
@@ -250,6 +254,7 @@ public class MongoVersionGCSupport extends VersionGCSupport {
     public Iterable<NodeDocument> getModifiedDocs(final long fromModified, final long toModified, final int limit,
                                                   @NotNull final String fromId, @NotNull Set<String> includedPathPrefixes,
                                                   @NotNull Set<String> excludedPathPrefixes) {
+        LOG.info("getModifiedDocs fromModified: {}, toModified: {}, limit: {}, fromId: {}", fromModified, toModified, limit, fromId);
         // (_modified = fromModified && _id > fromId || _modified > fromModified && _modified < toModified)
         final Bson query = or(
                 withIncludeExcludes(includedPathPrefixes, excludedPathPrefixes,
