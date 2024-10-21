@@ -312,8 +312,10 @@ public class DocumentNodeStoreBuilder<T extends DocumentNodeStoreBuilder<T>> {
     public T setFullGCIncludePaths(@Nullable String[] includePaths) {
         LOG.debug("Setting full GC include paths to {} {}", includePaths, Arrays.toString(includePaths));
         if (isNull(includePaths) || includePaths.length == 0 || Arrays.equals(includePaths, new String[]{"/"})) {
+            LOG.debug("--- Full GC include paths set to empty");
             this.fullGCIncludePaths = Set.of();
         } else {
+            LOG.debug("--- Full GC include paths set to {} {}", includePaths, Arrays.toString(includePaths));
             this.fullGCIncludePaths = Arrays.stream(includePaths).filter(Objects::nonNull).filter(PathUtils::isValid).collect(toUnmodifiableSet());;
         }
         LOG.debug("Full GC include paths set to {}", this.fullGCIncludePaths);
@@ -325,11 +327,18 @@ public class DocumentNodeStoreBuilder<T extends DocumentNodeStoreBuilder<T>> {
     }
 
     public T setFullGCExcludePaths(@Nullable String[] excludePaths) {
-        if (isNull(excludePaths) || excludePaths.length == 0) {
+        LOG.debug("Setting full GC exclude paths to {} {}", excludePaths, Arrays.toString(excludePaths));
+        for (String path : excludePaths) {
+            LOG.debug("-> Full GC exclude path iterator: '{}'", path);
+        }
+        if (isNull(excludePaths) || excludePaths.length == 0 || Arrays.equals(excludePaths, new String[]{""})) {
+            LOG.debug("--- Full GC exclude paths set to empty");
             this.fullGCExcludePaths = Set.of();
         } else {
+            LOG.debug("--- Full GC exclude paths set to {} {}", excludePaths, Arrays.toString(excludePaths));
             this.fullGCExcludePaths = Arrays.stream(excludePaths).filter(Objects::nonNull).filter(PathUtils::isValid).collect(toUnmodifiableSet());;
         }
+        LOG.debug("Full GC exclude paths set to {}", this.fullGCExcludePaths);
         return thisBuilder();
     }
 

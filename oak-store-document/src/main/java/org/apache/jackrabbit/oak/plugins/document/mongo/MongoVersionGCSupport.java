@@ -51,6 +51,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
+import com.mongodb.MongoClient;
 import com.mongodb.client.MongoCursor;
 
 import org.apache.jackrabbit.oak.commons.json.JsopBuilder;
@@ -66,6 +67,7 @@ import org.apache.jackrabbit.oak.plugins.document.VersionGarbageCollector.Versio
 import org.apache.jackrabbit.oak.plugins.document.util.CloseableIterable;
 import org.apache.jackrabbit.oak.plugins.document.util.Utils;
 import org.apache.jackrabbit.oak.stats.Clock;
+import org.bson.BsonDocument;
 import org.bson.conversions.Bson;
 import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
@@ -169,24 +171,42 @@ public class MongoVersionGCSupport extends VersionGCSupport {
      */
     private Bson withIncludeExcludes(@NotNull Set<String> includes, @NotNull Set<String> excludes, Bson query) {
         LOG.info("withIncludeExcludes() <- includes: {}, excludes: {}", includes, excludes);
+
+        LOG.debug("+==================+");
+        for(String include : includes) {
+            LOG.debug("withIncludeExcludes() -> Iterator include: {}", include);
+        }
+        for(String exclude : excludes) {
+            LOG.debug("withIncludeExcludes() -> Iterator exclude: {}", exclude);
+        }
+        LOG.debug("-==================-");
+
         Bson inclExcl = null;
+        LOG.debug("!includes.isEmpty() -> {}", !includes.isEmpty());
         if (!includes.isEmpty()) {
+            LOG.debug("withIncludeExcludes() -> includes not empty");
             final List<Bson> ors = new ArrayList<>(includes.size());
             for (String incl : includes) {
+                LOG.debug("withIncludeExcludes() -> adding include: {}", incl);
                 ors.add(Filters.regex(ID, ":" + incl));
             }
             inclExcl = or(ors);
         }
+        LOG.debug("!excludes.isEmpty() -> {}", !excludes.isEmpty());
         if (!excludes.isEmpty()) {
+            LOG.debug("withIncludeExcludes() -> excludes not empty");
             final List<Bson> ands = new ArrayList<>(excludes.size());
             for (String excl : excludes) {
+                LOG.debug("withIncludeExcludes() -> adding exclude: {}", excl);
                 ands.add(Filters.regex(ID, ":(?!" + excl + ")"));
             }
+            LOG.debug("inclExcl: {} - inclExcl != null ? -> {}", inclExcl, inclExcl != null);
             if (inclExcl != null) {
                 ands.add(inclExcl);
             }
             inclExcl = and(ands);
         }
+        LOG.debug("inclExcl: {} - inclExcl inclExcl == null ? -> {}", inclExcl, inclExcl == null);
         if (inclExcl == null) {
             // if no include or exclude path prefixes are defined,
             // then everything is included - i.e. we fall back to
@@ -254,7 +274,8 @@ public class MongoVersionGCSupport extends VersionGCSupport {
     public Iterable<NodeDocument> getModifiedDocs(final long fromModified, final long toModified, final int limit,
                                                   @NotNull final String fromId, @NotNull Set<String> includedPathPrefixes,
                                                   @NotNull Set<String> excludedPathPrefixes) {
-        LOG.info("getModifiedDocs fromModified: {}, toModified: {}, limit: {}, fromId: {}", fromModified, toModified, limit, fromId);
+        LOG.info("getModifiedDocs fromModified: {}, toModified: {}, limit: {}, fromId: {}, includedPathPrefixes: {}, excludedPathPrefixes: {}",
+                fromModified, toModified, limit, fromId, includedPathPrefixes, excludedPathPrefixes);
         // (_modified = fromModified && _id > fromId || _modified > fromModified && _modified < toModified)
         final Bson query = or(
                 withIncludeExcludes(includedPathPrefixes, excludedPathPrefixes,
@@ -266,6 +287,10 @@ public class MongoVersionGCSupport extends VersionGCSupport {
         final Bson sort = and(eq(MODIFIED_IN_SECS, 1), eq(ID, 1));
 
         logQueryExplain("fullGC query explain details, hint : {} - explain : {}", query, modifiedIdHint);
+        if (LOG.isDebugEnabled()) {
+            BsonDocument bson = query.toBsonDocument(BsonDocument.class, MongoClient.getDefaultCodecRegistry());
+            LOG.debug("getModifiedDocs : query is {}", bson);
+        }
 
         final FindIterable<BasicDBObject> cursor = getNodeCollection()
                 .find(query)
